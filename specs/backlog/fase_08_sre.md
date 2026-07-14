@@ -1,0 +1,1 @@
+Adicionar observabilidade no projeto, sistema de logs para visualizar o que o sistema está fazendo a cada momento podendo utilizar o turborepo

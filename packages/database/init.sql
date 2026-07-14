@@ -1,0 +1,30 @@
+CREATE TABLE IF NOT EXISTS leads (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    website TEXT UNIQUE,
+    city TEXT,
+    status_code INT,
+    title TEXT,
+    meta TEXT,
+    tech TEXT,
+    score INT,
+    tiers TEXT,
+    dimensions JSONB,
+    reason TEXT,
+    recommended_approach TEXT,
+    emails TEXT,
+    phones TEXT,
+    social_linkedin TEXT,
+    social_instagram TEXT,
+    social_facebook TEXT,
+    tech_stack TEXT,
+    cms TEXT,
+    performance_score NUMERIC,
+    lighthouse_performance NUMERIC,
+    lighthouse_accessibility NUMERIC,
+    lighthouse_seo NUMERIC,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_leads_website ON leads (website);

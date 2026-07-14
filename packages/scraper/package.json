@@ -1,0 +1,19 @@
+{
+  "name": "@lead-hunter/scraper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lead-hunter/config": "*",
+    "@lead-hunter/logger": "*",
+    "@lead-hunter/shared": "*",
+    "playwright": "^1.45.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

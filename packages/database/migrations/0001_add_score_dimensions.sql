@@ -1,0 +1,15 @@
+ALTER TABLE leads
+  ADD COLUMN IF NOT EXISTS tiers                    text,
+  ADD COLUMN IF NOT EXISTS dimensions               jsonb,
+  ADD COLUMN IF NOT EXISTS recommended_approach     text,
+  ADD COLUMN IF NOT EXISTS emails                   text[],
+  ADD COLUMN IF NOT EXISTS phones                   text[],
+  ADD COLUMN IF NOT EXISTS social_linkedin          text,
+  ADD COLUMN IF NOT EXISTS social_instagram         text,
+  ADD COLUMN IF NOT EXISTS social_facebook          text,
+  ADD COLUMN IF NOT EXISTS tech_stack               text[],
+  ADD COLUMN IF NOT EXISTS cms                      text,
+  ADD COLUMN IF NOT EXISTS performance_score        integer,
+  ADD COLUMN IF NOT EXISTS lighthouse_performance   integer,
+  ADD COLUMN IF NOT EXISTS lighthouse_accessibility integer,
+  ADD COLUMN IF NOT EXISTS lighthouse_seo           integer;

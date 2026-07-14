@@ -1,0 +1,26 @@
+{
+  "name": "lead-hunter",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "concurrently -n api,worker -c blue,green \"npm run dev -w @lead-hunter/api\" \"npm run dev -w @lead-hunter/worker\"",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "concurrently": "^10.0.3",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "@bull-board/api": "^8.0.2",
+    "@bull-board/fastify": "^8.0.2",
+    "bullmq": "^5.79.2",
+    "fastify": "^5.9.0"
+  }
+}
