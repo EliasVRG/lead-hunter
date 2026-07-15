@@ -1,0 +1,15 @@
+{
+  "name": "Seu Nome",
+  "headline": "Ex: Desenvolvedor Backend Node.js / Automação",
+  "seniority": "pleno",
+  "skills": ["Node.js", "TypeScript", "PostgreSQL"],
+  "roles": ["Backend Developer"],
+  "stack": ["Node.js", "TypeScript", "Playwright", "BullMQ", "PostgreSQL"],
+  "minRate": null,
+  "maxRate": null,
+  "currency": "BRL",
+  "availability": "project-based",
+  "remotePreference": "remote-only",
+  "languages": ["Português"],
+  "bio": "Preencha com um resumo curto da sua experiência, focado no que você quer que a IA use para comparar com as vagas."
+}

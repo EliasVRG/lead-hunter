@@ -1,11 +1,21 @@
-# Lead Hunter
+# Job Hunter
 
-Sistema automatizado de prospecção inteligente de leads baseado em scraping, enriquecimento de dados e análise por IA.
+> Repo pivotado de um sistema de prospecção B2B para uma ferramenta pessoal e single-tenant: ele
+> descobre vagas/projetos freelance publicamente listados, compara cada um com o seu currículo via
+> IA e gera um rascunho de proposta para os que valem a pena. Ver
+> `specs/completed/fase_00_pivot_job_hunter.md` para o histórico da decisão.
+
+Ferramenta pessoal que descobre vagas freelance (hoje: 99Freelas), pontua a compatibilidade com o
+seu currículo via IA e gera rascunhos de proposta — sem envio automático, você sempre revisa e
+envia manualmente.
 
 ## Fluxo
 
 ```
-HTTP Request → API → Redis Queue (BullMQ) → Worker → Scraper → AI → PostgreSQL
+POST /discovery/runs → Redis Queue (BullMQ) → job-discovery.worker (99Freelas)
+                                             → match.worker (compatibilidade x ResumeProfile)
+                                             → proposal.worker (rascunho de proposta, tier APPLY)
+                                             → PostgreSQL
                               ↕
                        Bull Board UI
                     (admin/queues)
@@ -108,11 +118,26 @@ Funcionalidades:
 # Health check
 curl http://localhost:3000/health
 
-# Criar lead (enfileira job de scraping)
-curl -X POST http://localhost:3000/leads \
+# Cadastrar/atualizar seu currículo (fonte da verdade, versionado em config/resume-profile.json)
+curl -X POST http://localhost:3000/resume-profile \
   -H "Content-Type: application/json" \
-  -d '{"website": "https://exemplo.com.br", "name": "Exemplo", "city": "São Paulo"}'
+  -d '{"name": "Seu Nome", "headline": "Backend Developer", "seniority": "pleno", "skills": ["Node.js"], "bio": "..."}'
+
+curl http://localhost:3000/resume-profile
+
+# Disparar um ciclo de descoberta de vagas no 99Freelas
+curl -X POST http://localhost:3000/discovery/runs -H "Content-Type: application/json" -d '{}'
+
+# Listar vagas descobertas (filtráveis por tier/status)
+curl "http://localhost:3000/jobs?tier=APPLY"
+
+# Atualizar status manualmente (ex: depois de enviar a proposta)
+curl -X PATCH http://localhost:3000/jobs/1/status \
+  -H "Content-Type: application/json" -d '{"status": "applied"}'
 ```
+
+Edite `config/resume-profile.json` (ou use `POST /resume-profile`) com os seus dados reais antes
+de rodar uma descoberta — o arquivo vem com dados de exemplo.
 
 ## Ambiente
 
@@ -130,4 +155,8 @@ API_PORT=3000
 
 ## Disclaimer
 
-Este sistema utiliza apenas dados públicos e técnicas de análise não intrusivas.
+Este sistema utiliza apenas dados públicos e técnicas de análise não intrusivas. Scraping fica
+restrito a plataformas com listagens públicas (hoje: 99Freelas) — LinkedIn está fora de escopo por
+proibir scraping automatizado em seus termos de uso, mesmo com login próprio (ver
+`specs/backlog/fase_07_discovery.md`). Nenhuma candidatura é enviada automaticamente: o sistema
+gera o rascunho e para, o envio é sempre manual.

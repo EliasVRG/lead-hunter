@@ -1,1 +1,0 @@
-Adicionar testes unitarios da aplicação para facil detecção de problemas na modificação de codigo

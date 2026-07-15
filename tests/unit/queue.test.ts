@@ -6,5 +6,6 @@ describe("JobType", () => {
     expect(JobType.Scrape).toBe("scrape");
     expect(JobType.AiScore).toBe("ai-score");
     expect(JobType.Enrichment).toBe("enrichment");
+    expect(JobType.ProposalDraft).toBe("proposal-draft");
   });
 });

@@ -11,6 +11,7 @@
     "@google/generative-ai": "^0.24.1",
     "@lead-hunter/config": "*",
     "@lead-hunter/logger": "*",
+    "@lead-hunter/shared": "*",
     "zod": "^3.23.0"
   },
   "devDependencies": {

@@ -34,3 +34,6 @@ export { analyzePerformance } from "./lighthouse.js";
 export type { PerformanceMetrics } from "./lighthouse.js";
 export { crawlPage } from "./metadata.js";
 export type { FullMetadata, SocialLinks } from "./metadata.js";
+export { isAllowedByRobots, isPathAllowed } from "./robots.js";
+export { scrape99Freelas, discoverJobUrls, scrapeJobDetail, parseBudget, extractExternalId } from "./platforms/99freelas.js";
+export type { ScrapedJobPosting, DiscoveryOptions } from "./platforms/99freelas.js";

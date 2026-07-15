@@ -1,4 +1,4 @@
-# 🤖 Lead Hunter — Autonomous Agent System
+# 🤖 Job Hunter — Autonomous Agent System
 
 Este repositório é operado por um sistema de desenvolvimento assistido por agente.
 
@@ -10,6 +10,13 @@ O objetivo do agente é:
 - evoluir o sistema
 
 sempre seguindo arquitetura e specs definidos.
+
+> ⚠️ Este projeto era originalmente um "Lead Hunter" B2B (scraping de sites de empresas para
+> prospecção de vendas). A partir da spec `specs/current/fase_00_pivot_job_hunter.md` ele foi
+> reorientado para um **Job Hunter pessoal**: descobrir vagas/projetos freelance (começando por
+> 99Freelas), comparar cada vaga com o currículo/perfil do usuário e gerar rascunhos de proposta
+> para as oportunidades compatíveis. É uma ferramenta **single-tenant**, para uso do próprio
+> usuário — multi-tenant/SaaS está fora de escopo (ver `specs/backlog/fase_06_multitenant.md`).
 
 ---
 
@@ -146,12 +153,17 @@ Todos os jobs devem seguir padrão:
 ```ts
 {
   id: string,
-  type: "scrape" | "ai-score" | "enrichment",
+  type: "scrape" | "ai-score" | "enrichment" | "proposal-draft",
   payload: object,
   attempts: number,
   createdAt: Date
 }
 ```
+
+* `scrape` → descoberta de vagas em uma plataforma (ex: 99Freelas)
+* `ai-score` → cálculo do match entre uma vaga e o perfil/currículo do usuário
+* `enrichment` → enriquecimento opcional de dados da vaga/cliente (reservado; não usado no MVP do pivot)
+* `proposal-draft` → geração de rascunho de proposta para vagas com tier de alta compatibilidade
 
 ---
 
@@ -212,17 +224,32 @@ Scraping deve respeitar:
 * rate limiting
 * robots.txt awareness
 
+Plataformas com listagens públicas (ex: 99Freelas) estão dentro de escopo. Plataformas cujas
+vagas exigem login para serem visualizadas (ex: LinkedIn) estão **fora de escopo** até existir
+uma abordagem compatível com os termos de uso (ex: parsing de e-mail/RSS de job alerts) — ver
+`specs/backlog/fase_07_discovery.md`.
+
 ---
 
-Scraping outputs must be:
+Scraping outputs (job postings) must be:
 
 ```json
 {
+  "platform": string,
+  "externalId": string,
+  "url": string,
   "title": string,
-  "meta": string,
-  "technologies": string[],
-  "status": number,
-  "performance": number
+  "description": string,
+  "skills": string[],
+  "budgetType": "fixed" | "hourly" | "unknown",
+  "budgetMin": number | null,
+  "budgetMax": number | null,
+  "currency": string | null,
+  "clientName": string | null,
+  "clientRating": number | null,
+  "proposalsCount": number | null,
+  "postedAt": string,
+  "status": number
 }
 ```
 
@@ -332,10 +359,10 @@ UPDATE DOCS
 
 # 🧠 14. GOAL OF THE SYSTEM
 
-Transform public web data into:
+Transform public job/freelance listings into:
 
-* qualified leads
-* scored opportunities
-* actionable business insights
+* oportunidades relevantes para o perfil e currículo do usuário
+* scores de compatibilidade explicáveis (skill, senioridade, remuneração, urgência)
+* rascunhos de proposta prontos para revisão
 
-via automated, scalable pipeline.
+via pipeline automatizado, para uso pessoal (single-tenant).

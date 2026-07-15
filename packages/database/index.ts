@@ -81,4 +81,104 @@ export async function healthcheck(): Promise<boolean> {
   }
 }
 
+export interface JobPostingRow {
+  id?: number;
+  platform: string;
+  external_id: string;
+  url: string;
+  title: string;
+  description: string | null;
+  skills: string[] | null;
+  budget_type: string | null;
+  budget_min: number | null;
+  budget_max: number | null;
+  currency: string | null;
+  client_name: string | null;
+  client_rating: number | null;
+  proposals_count: number | null;
+  posted_at: Date | null;
+  score: number | null;
+  tier: string | null;
+  dimensions: any | null;
+  reason: string | null;
+  red_flags: string[] | null;
+  proposal_draft: string | null;
+  status: string;
+  created_at?: Date;
+  updated_at?: Date;
+}
+
+export async function upsertJobPosting(job: Partial<JobPostingRow>): Promise<JobPostingRow> {
+  if (!job.platform || !job.external_id) {
+    throw new Error("platform and external_id are required");
+  }
+
+  const entries = Object.entries(job).filter(
+    ([k, v]) => k !== "id" && v !== undefined,
+  );
+
+  const cols = entries.map(([k]) => k);
+  const vals = entries.map(([, v]) => v);
+
+  const updates = cols
+    .filter((k) => k !== "platform" && k !== "external_id")
+    .map((k) => `${k} = COALESCE(EXCLUDED.${k}, job_postings.${k})`);
+
+  const [result] = await sql.unsafe(
+    `INSERT INTO job_postings (${cols.join(", ")})
+     VALUES (${vals.map((_, i) => `$${i + 1}`).join(", ")})
+     ON CONFLICT (platform, external_id)
+     DO UPDATE SET ${updates.join(", ")}, updated_at = NOW()
+     RETURNING *`,
+    vals,
+  );
+
+  return result as unknown as JobPostingRow;
+}
+
+export async function findJobPostingByPlatformAndExternalId(
+  platform: string,
+  externalId: string,
+): Promise<JobPostingRow | null> {
+  const [result] = await sql`
+    SELECT * FROM job_postings WHERE platform = ${platform} AND external_id = ${externalId}
+  `;
+  return (result ?? null) as unknown as JobPostingRow | null;
+}
+
+export async function findJobPostingById(id: number): Promise<JobPostingRow | null> {
+  const [result] = await sql`
+    SELECT * FROM job_postings WHERE id = ${id}
+  `;
+  return (result ?? null) as unknown as JobPostingRow | null;
+}
+
+export async function listJobPostings(filters: {
+  tier?: string;
+  status?: string;
+}): Promise<JobPostingRow[]> {
+  const conditions = [];
+  if (filters.tier) conditions.push(sql`tier = ${filters.tier}`);
+  if (filters.status) conditions.push(sql`status = ${filters.status}`);
+
+  if (conditions.length === 0) {
+    return sql`SELECT * FROM job_postings ORDER BY score DESC NULLS LAST, created_at DESC` as unknown as Promise<JobPostingRow[]>;
+  }
+
+  const where = conditions.reduce((acc, cond) => sql`${acc} AND ${cond}`);
+  return sql`SELECT * FROM job_postings WHERE ${where} ORDER BY score DESC NULLS LAST, created_at DESC` as unknown as Promise<JobPostingRow[]>;
+}
+
+export async function updateJobPostingStatus(
+  id: number,
+  status: string,
+): Promise<JobPostingRow | null> {
+  const [result] = await sql`
+    UPDATE job_postings SET status = ${status}, updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING *
+  `;
+  return (result ?? null) as unknown as JobPostingRow | null;
+}
+
 export { sql };

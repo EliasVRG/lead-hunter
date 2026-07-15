@@ -10,6 +10,7 @@ export enum JobType {
   Scrape = "scrape",
   AiScore = "ai-score",
   Enrichment = "enrichment",
+  ProposalDraft = "proposal-draft",
 }
 
 export interface JobPayload {
