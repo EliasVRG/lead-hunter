@@ -1,15 +1,15 @@
 {
-  "name": "Seu Nome",
-  "headline": "Ex: Desenvolvedor Backend Node.js / Automação",
-  "seniority": "pleno",
-  "skills": ["Node.js", "TypeScript", "PostgreSQL"],
-  "roles": ["Backend Developer"],
-  "stack": ["Node.js", "TypeScript", "Playwright", "BullMQ", "PostgreSQL"],
+  "name": "Elias Victor Rocha Garcia",
+  "headline": "Desenvolvedor Full Stack | PHP, React, Node.js e Oracle | APIs, Integrações e Observabilidade",
+  "seniority": "junior-pleno",
+  "skills": ["PHP", "React", "JavaScript", "TypeScript", "Node.js", "Oracle SQL", "APIs REST", "Linux", "Observabilidade"],
+  "roles": ["Full Stack Developer", "Backend Developer"],
+  "stack": ["PHP", "React", "Node.js", "NestJS", "TypeScript", "Oracle SQL"],
   "minRate": null,
   "maxRate": null,
   "currency": "BRL",
-  "availability": "project-based",
-  "remotePreference": "remote-only",
+  "availability": null,
+  "remotePreference": null,
   "languages": ["Português"],
-  "bio": "Preencha com um resumo curto da sua experiência, focado no que você quer que a IA use para comparar com as vagas."
+  "bio": "Desenvolvedor Full Stack com quase 2 anos construindo e mantendo sistemas corporativos, do banco de dados (Oracle SQL) à interface (React/TypeScript), incluindo APIs REST, integrações entre sistemas e observabilidade em produção (rastreamento de erros com Bugsink, logs centralizados). Criador de biblioteca open-source de validação e sanitização de imagens para backend, com foco em confiabilidade e segurança de pipelines de upload."
 }
