@@ -8,7 +8,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev": "concurrently -n api,worker -c blue,green \"npm run dev -w @lead-hunter/api\" \"npm run dev -w @lead-hunter/worker\"",
-    "test": "npm run test --workspaces --if-present",
+    "test": "vitest run",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {

@@ -1,7 +1,8 @@
 # 🧩 FASE 09 — Cobertura de testes unitários
 
 ## 📌 Status
-Current
+Completed — testes adicionados para `packages/database`, os três workers novos e
+`packages/scraper/robots.ts`; `npm test` roda `vitest run` na raiz e cobre 11 arquivos de teste.
 
 ---
 
@@ -47,10 +48,10 @@ Fora do escopo:
 
 ## 🧪 Critérios de aceite
 
-* [ ] `packages/database` tem testes cobrindo upsert com dedupe e os filtros de `listJobPostings`
-* [ ] Os três workers novos têm testes com dependências mockadas
-* [ ] `packages/scraper/robots.ts` tem testes para `Disallow`/`Allow` e ausência de `robots.txt`
-* [ ] `npm test` continua verde após a adição
+* [x] `packages/database` tem testes cobrindo upsert com dedupe e os filtros de `listJobPostings`
+* [x] Os três workers novos têm testes com dependências mockadas
+* [x] `packages/scraper/robots.ts` tem testes para `Disallow`/`Allow` e ausência de `robots.txt`
+* [x] `npm test` continua verde após a adição
 
 ---
 
