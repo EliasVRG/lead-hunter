@@ -17,7 +17,8 @@
     "@lead-hunter/notifier": "*",
     "@lead-hunter/observability": "*",
     "@lead-hunter/queue": "*",
-    "@lead-hunter/scraper": "*"
+    "@lead-hunter/scraper": "*",
+    "@lead-hunter/screening": "*"
   },
   "devDependencies": {
     "tsx": "^4.16.0",

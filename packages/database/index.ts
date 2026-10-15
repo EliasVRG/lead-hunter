@@ -137,6 +137,9 @@ export interface JobPostingRow {
   proposal_currency: string | null;
   proposal_model: string | null;
 
+  /** Motivo do corte, quando `status` é `dismissed` (fase 12). */
+  dismissed_reason: string | null;
+
   status: JobPostingStatus;
   created_at?: Date;
   updated_at?: Date;

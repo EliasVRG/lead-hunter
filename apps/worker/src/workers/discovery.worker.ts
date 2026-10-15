@@ -1,7 +1,12 @@
 import { type Job } from "bullmq";
 import { type DiscoveryJobData, enqueueTriage } from "@lead-hunter/queue";
 import { scrape99Freelas, type ScrapedJobPosting } from "@lead-hunter/scraper";
-import { upsertJobPosting, type JobPostingRow } from "@lead-hunter/database";
+import {
+  updateJobPostingByRef,
+  upsertJobPosting,
+  type JobPostingRow,
+} from "@lead-hunter/database";
+import { screenJobPosting } from "@lead-hunter/screening";
 import { logger } from "@lead-hunter/logger";
 
 function toRow(job: ScrapedJobPosting): Partial<JobPostingRow> {
@@ -34,9 +39,14 @@ function toRow(job: ScrapedJobPosting): Partial<JobPostingRow> {
 /**
  * Estágio 1: descobre projetos no 99Freelas e os entrega à fila de triagem.
  *
- * Só enfileira vagas ainda sem score. Um upsert de vaga já triada atualiza os
- * contadores voláteis (propostas, interessados) sem pagar uma nova chamada de
- * IA — é o que permite rodar a descoberta de forma recorrente.
+ * Três caminhos possíveis por vaga:
+ *
+ * 1. já tem score → só atualiza os contadores voláteis (propostas,
+ *    interessados), sem pagar nova chamada de IA. É o que permite rodar a
+ *    descoberta de forma recorrente.
+ * 2. reprovada no filtro determinístico → gravada como `dismissed` com motivo,
+ *    sem chamar IA.
+ * 3. o resto → fila de triagem.
  */
 export async function discoveryProcessor(job: Job<DiscoveryJobData>): Promise<void> {
   const startedAt = Date.now();
@@ -52,16 +62,39 @@ export async function discoveryProcessor(job: Job<DiscoveryJobData>): Promise<vo
 
     let enqueued = 0;
     let refreshed = 0;
+    let screenedOut = 0;
 
     for (const scrapedJob of scraped) {
       const row = await upsertJobPosting(toRow(scrapedJob));
+      const alreadyTriaged = row.score !== null && row.score !== undefined;
 
-      if (row.score === null || row.score === undefined) {
-        await enqueueTriage({ platform: row.platform, externalId: row.external_id });
-        enqueued++;
-      } else {
+      if (alreadyTriaged) {
         refreshed++;
+        continue;
       }
+
+      // Uma vaga já descartada volta na listagem a cada rodada e continua sem
+      // score. Sem esta guarda ela seria reavaliada indefinidamente — e um
+      // descarte manual feito na tela de revisão seria desfeito.
+      if (row.status === "dismissed") continue;
+
+      const verdict = screenJobPosting(row);
+
+      if (!verdict.keep) {
+        await updateJobPostingByRef(row.platform, row.external_id, {
+          status: "dismissed",
+          dismissed_reason: `${verdict.rule}: ${verdict.reason}`,
+        });
+        screenedOut++;
+        logger.debug(
+          { externalId: row.external_id, rule: verdict.rule, reason: verdict.reason },
+          "job screened out before triage",
+        );
+        continue;
+      }
+
+      await enqueueTriage({ platform: row.platform, externalId: row.external_id });
+      enqueued++;
     }
 
     logger.info(
@@ -72,6 +105,10 @@ export async function discoveryProcessor(job: Job<DiscoveryJobData>): Promise<vo
         scraped: scraped.length,
         enqueuedForTriage: enqueued,
         alreadyTriaged: refreshed,
+        screenedOut,
+        // Cada vaga cortada é uma chamada de triagem que não foi gasta — o
+        // número que diz se o filtro está pagando o próprio custo.
+        aiCallsSaved: screenedOut,
         durationMs: Date.now() - startedAt,
       },
       "discovery completed",

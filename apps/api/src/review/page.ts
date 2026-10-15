@@ -101,6 +101,7 @@ function renderCard(job: JobPostingRow): string {
     </div>
   </header>
 
+  ${job.dismissed_reason ? `<p class="dismissed">Descartada automaticamente — ${esc(job.dismissed_reason)}</p>` : ""}
   ${job.reason ? `<p class="reason">${esc(job.reason)}</p>` : ""}
   ${renderList("Pontos de atenção", job.red_flags, "flags")}
 
@@ -174,6 +175,8 @@ h2 a:hover { color: var(--accent); text-decoration: underline; }
 .note { font-style: italic; cursor: help; }
 .warn { color: var(--warn); }
 .reason { font-size: 14px; color: var(--muted); margin: 14px 0 0; }
+.dismissed { font-size: 13px; color: var(--warn); background: var(--warn-bg);
+  border-radius: 7px; padding: 9px 12px; margin: 14px 0 0; }
 .block { margin-top: 16px; }
 h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
   margin: 0 0 7px; display: flex; align-items: center; gap: 9px; }

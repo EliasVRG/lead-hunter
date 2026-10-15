@@ -32,6 +32,25 @@ POST /discovery/runs
 `MAYBE` e `SKIP` param no banco — gerar rascunho para tudo queimaria a cota gratuita em vagas que
 você não vai responder.
 
+Antes da IA há um **filtro determinístico**: vaga com prazo vencido ou concorrência acima do teto
+é descartada sem gastar chamada. Em dados reais do 99Freelas isso corta ~10% das vagas, incluindo
+casos de 235 propostas que antes chegavam a `APPLY`.
+
+```env
+SCREENING_MAX_PROPOSALS=40     # 0 desliga
+SCREENING_DROP_EXPIRED=true
+SCREENING_MAX_AGE_HOURS=0      # 0 desliga (a descoberta já filtra por idade)
+```
+
+A vaga cortada é **gravada** como `dismissed` com o motivo, não ignorada: sem registro não há como
+auditar se o filtro está cortando demais, e ela seria redescoberta e reavaliada a cada rodada.
+Dado ausente nunca descarta — o scraper pode falhar em ler um campo, e tratar "não sei" como
+"está morta" perderia vaga boa em silêncio.
+
+```bash
+curl "localhost:3000/jobs?status=dismissed"   # o que o filtro cortou, e por quê
+```
+
 O pipeline termina no rascunho. A última etapa é sua, em **<http://localhost:3000/review>**:
 ler, corrigir, copiar, colar no 99Freelas e marcar como enviada.
 
@@ -118,6 +137,7 @@ lead-hunter/
 │   ├── database/                 # schema SQL, migrations, queries
 │   ├── notifier/                 # alerta de vaga compatível (desktop/webhook)
 │   ├── queue/                    # 3 filas BullMQ, agendador, payloads tipados
+│   ├── screening/                # filtro de vaga morta, antes da IA
 │   ├── scraper/platforms/99freelas/
 │   │   ├── http.ts               # fetch, robots.txt, montagem de URL
 │   │   ├── parse.ts              # parsers puros (listagem + detalhe)
