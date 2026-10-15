@@ -2,7 +2,15 @@ import Fastify from "fastify";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { FastifyAdapter } from "@bull-board/fastify";
-import { allQueues, enqueueDiscovery, enqueueProposal, queueCounts } from "@lead-hunter/queue";
+import {
+  allQueues,
+  discoveryScheduleConfig,
+  discoveryScheduleState,
+  enqueueDiscovery,
+  enqueueProposal,
+  ensureDiscoverySchedule,
+  queueCounts,
+} from "@lead-hunter/queue";
 import {
   JOB_POSTING_STATUSES,
   findJobPostingById,
@@ -164,6 +172,15 @@ app.post<{ Params: { id: string } }>("/jobs/:id/proposal", async (req, reply) =>
   });
 });
 
+/**
+ * Estado do agendador lido do Redis, não da config: se a API subiu com uma
+ * configuração e o Redis ainda guarda outra, é a do Redis que está rodando.
+ */
+app.get("/discovery/schedule", async (_req, reply) => {
+  const state = await discoveryScheduleState();
+  return reply.status(200).send({ ...state, configured: discoveryScheduleConfig });
+});
+
 /** Visão rápida do pipeline sem abrir o Bull Board. */
 app.get("/queues/status", async (_req, reply) => {
   return reply.status(200).send(await queueCounts());
@@ -184,6 +201,19 @@ app.get("/health", async (_req, reply) => {
 });
 
 const port = Number(process.env.API_PORT ?? 3000);
-app.listen({ port, host: "0.0.0.0" }).then(() => {
-  logger.info({ port, bullBoard: `http://localhost:${port}/queues` }, "api started");
+
+app.listen({ port, host: "0.0.0.0" }).then(async () => {
+  logger.info(
+    { port, review: `http://localhost:${port}/review`, bullBoard: `http://localhost:${port}/queues` },
+    "api started",
+  );
+
+  // Converge o agendamento recorrente para a config atual. Fica aqui porque
+  // apps/api é quem cria jobs na fila (AGENT.md §3), e depois do listen para
+  // que um Redis fora do ar não impeça a API de subir e reportar /health.
+  try {
+    await ensureDiscoverySchedule(discoveryScheduleConfig);
+  } catch (err) {
+    logger.error({ error: (err as Error).message }, "failed to register discovery schedule");
+  }
 });

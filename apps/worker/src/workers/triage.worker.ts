@@ -3,6 +3,7 @@ import { type TriageJobData, enqueueProposal } from "@lead-hunter/queue";
 import { findJobPostingByPlatformAndExternalId, updateJobPostingByRef } from "@lead-hunter/database";
 import { loadResumeProfile } from "@lead-hunter/config/resume-profile.js";
 import { getAIProvider } from "@lead-hunter/ai";
+import { notifyQuietly } from "@lead-hunter/notifier";
 import { logger } from "@lead-hunter/logger";
 
 /**
@@ -55,6 +56,23 @@ export async function triageProcessor(job: Job<TriageJobData>): Promise<void> {
 
     if (updated?.tier === "APPLY") {
       await enqueueProposal({ platform, externalId, score: triage.score });
+
+      // Avisa aqui, e não quando o rascunho fica pronto: a proposta leva mais
+      // ~20s e pode estar atrás de fila ou rate limit. Numa plataforma onde a
+      // vaga acumula centenas de concorrentes em horas, o que importa é saber
+      // que ela existe — o rascunho alcança depois.
+      await notifyQuietly({
+        title: `Vaga compatível (${triage.score}) — ${posting.title}`,
+        body: [
+          triage.matched_skills.length > 0 ? `Skills: ${triage.matched_skills.join(", ")}` : "",
+          `${posting.proposals_count ?? 0} propostas concorrentes`,
+          triage.red_flags.length > 0 ? `Atenção: ${triage.red_flags.join("; ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        url: posting.url,
+        urgency: "critical",
+      });
     }
 
     logger.info(

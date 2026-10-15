@@ -35,6 +35,42 @@ você não vai responder.
 O pipeline termina no rascunho. A última etapa é sua, em **<http://localhost:3000/review>**:
 ler, corrigir, copiar, colar no 99Freelas e marcar como enviada.
 
+## Descoberta automática
+
+Com `DISCOVERY_SCHEDULE_ENABLED=true`, a descoberta roda sozinha no intervalo configurado (padrão
+10 min) e você recebe um alerta quando uma vaga de tier `APPLY` aparece.
+
+Isso não é conveniência — é o ponto. Nas vagas que o sistema triou manualmente, a concorrência
+estava em **130 a 230 propostas**, porque foram encontradas dias depois de publicadas. Ser a
+proposta nº 231 não converte. O valor de automatizar não é escrever o texto, é **saber da vaga na
+primeira hora**, quando existem 3 propostas.
+
+```env
+DISCOVERY_SCHEDULE_ENABLED=true
+DISCOVERY_SCHEDULE_EVERY_MS=600000       # 10 min
+DISCOVERY_SCHEDULE_MAX_AGE_HOURS=3       # rodando sempre, vaga velha já foi vista
+NOTIFIER=desktop                         # desktop | webhook | none
+```
+
+`GET /discovery/schedule` mostra o estado real lido do Redis e a próxima execução. O agendador é
+idempotente: reiniciar a API não duplica, e mudar o intervalo substitui o anterior.
+
+A rodada manual continua existindo, para busca dirigida por termo ou categoria.
+
+### Notificação
+
+| driver | como funciona |
+|--------|---------------|
+| `desktop` | `notify-send` — exige `sudo apt install libnotify-bin` e um terminal da sessão gráfica (precisa de `DBUS_SESSION_BUS_ADDRESS`) |
+| `webhook` | `POST` JSON em `NOTIFIER_WEBHOOK_URL` — serve Slack, Discord, Telegram |
+| `none` | desligado (padrão) |
+
+O alerta dispara na **triagem**, não quando o rascunho fica pronto: a proposta leva mais ~20s e
+pode estar atrás de fila. O que importa é você já abrir o link enquanto o texto é escrito.
+
+Falha de notificação nunca derruba o job — o resultado já está no banco, e um retry gastaria cota
+de IA de novo só por causa de um aviso perdido.
+
 ## Tela de revisão
 
 <http://localhost:3000/review> (a raiz redireciona para lá) lista o que está esperando você,
@@ -80,7 +116,8 @@ lead-hunter/
 │   │   └── providers/openrouter/ # cliente com fallback de modelos e de formato
 │   ├── config/                   # env (.env), ai, db, queue, resume-profile
 │   ├── database/                 # schema SQL, migrations, queries
-│   ├── queue/                    # 3 filas BullMQ, payloads tipados
+│   ├── notifier/                 # alerta de vaga compatível (desktop/webhook)
+│   ├── queue/                    # 3 filas BullMQ, agendador, payloads tipados
 │   ├── scraper/platforms/99freelas/
 │   │   ├── http.ts               # fetch, robots.txt, montagem de URL
 │   │   ├── parse.ts              # parsers puros (listagem + detalhe)
@@ -201,6 +238,7 @@ A tela de revisão cobre o uso normal. A API é para automação e inspeção.
 # Status geral
 curl localhost:3000/health
 curl localhost:3000/queues/status
+curl localhost:3000/discovery/schedule
 
 # Dispara descoberta
 curl -X POST localhost:3000/discovery/runs \

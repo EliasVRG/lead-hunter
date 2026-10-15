@@ -1,5 +1,9 @@
 import { Queue, Worker, type Job, type WorkerOptions } from "bullmq";
-import { queueConfig } from "@lead-hunter/config/queue.js";
+import {
+  discoveryScheduleConfig,
+  queueConfig,
+  type DiscoveryScheduleConfig,
+} from "@lead-hunter/config/queue.js";
 import { logger } from "@lead-hunter/logger";
 
 /**
@@ -170,4 +174,84 @@ export async function queueCounts() {
 
 export async function closeQueues(): Promise<void> {
   await Promise.all(allQueues.map((queue) => queue.close()));
+}
+
+/**
+ * Nome fixo do job repetível de descoberta.
+ *
+ * O BullMQ identifica um agendamento pela combinação nome + opções de repeat.
+ * Registrar com nome variável a cada boot acumularia agendadores no Redis e
+ * multiplicaria o scraping silenciosamente — daí o nome constante, somado à
+ * limpeza de agendamentos antigos em `ensureDiscoverySchedule`.
+ */
+export { discoveryScheduleConfig };
+
+export const DISCOVERY_SCHEDULER_NAME = "scheduled-discovery";
+
+export interface ScheduleState {
+  enabled: boolean;
+  everyMs: number | null;
+  nextRunAt: string | null;
+  options: DiscoveryJobData | null;
+}
+
+/**
+ * Deixa o agendamento recorrente igual à configuração atual.
+ *
+ * Idempotente e convergente: remove qualquer agendador de descoberta que não
+ * seja exatamente o configurado (intervalo antigo, ou a config tendo sido
+ * desligada) e cria o novo só se faltar. Pode ser chamado a cada boot.
+ */
+export async function ensureDiscoverySchedule(
+  config: DiscoveryScheduleConfig,
+): Promise<ScheduleState> {
+  const existing = await discoveryQueue.getRepeatableJobs();
+
+  const stale = existing.filter(
+    (job) =>
+      job.name === DISCOVERY_SCHEDULER_NAME &&
+      (!config.enabled || job.every !== String(config.everyMs)),
+  );
+
+  for (const job of stale) {
+    await discoveryQueue.removeRepeatableByKey(job.key);
+    logger.info(
+      { queue: QUEUE_NAMES.discovery, key: job.key, every: job.every },
+      "removed stale discovery schedule",
+    );
+  }
+
+  if (!config.enabled) {
+    logger.info("discovery schedule disabled — run POST /discovery/runs manually");
+    return { enabled: false, everyMs: null, nextRunAt: null, options: null };
+  }
+
+  const data: DiscoveryJobData = { ...config.options };
+  await discoveryQueue.add(DISCOVERY_SCHEDULER_NAME, data, {
+    repeat: { every: config.everyMs },
+  });
+
+  logger.info(
+    { queue: QUEUE_NAMES.discovery, everyMs: config.everyMs, options: data },
+    "discovery schedule active",
+  );
+
+  return { ...(await discoveryScheduleState()), options: data };
+}
+
+/** Estado real lido do Redis — não a configuração pretendida. */
+export async function discoveryScheduleState(): Promise<ScheduleState> {
+  const jobs = await discoveryQueue.getRepeatableJobs();
+  const scheduled = jobs.find((job) => job.name === DISCOVERY_SCHEDULER_NAME);
+
+  if (!scheduled) {
+    return { enabled: false, everyMs: null, nextRunAt: null, options: null };
+  }
+
+  return {
+    enabled: true,
+    everyMs: scheduled.every ? Number(scheduled.every) : null,
+    nextRunAt: scheduled.next ? new Date(scheduled.next).toISOString() : null,
+    options: null,
+  };
 }

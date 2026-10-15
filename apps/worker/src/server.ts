@@ -1,4 +1,5 @@
 import { QUEUE_NAMES, closeQueues, createQueueWorker } from "@lead-hunter/queue";
+import { verifyNotifier } from "@lead-hunter/notifier";
 import { logger } from "@lead-hunter/logger";
 import { discoveryProcessor } from "./workers/discovery.worker.js";
 import { triageProcessor } from "./workers/triage.worker.js";
@@ -16,6 +17,8 @@ const workers = [
 ];
 
 logger.info({ queues: Object.values(QUEUE_NAMES) }, "worker started");
+
+void verifyNotifier();
 
 /**
  * Encerra esperando o job em andamento terminar. Sem isso, um Ctrl+C no meio de
