@@ -166,6 +166,30 @@ numerológicos", orçamento aberto) pontuou 35+18+4 = 57 de 80 disponíveis → 
 `APPLY`**, e seguiu sozinha para a fila de proposta. A mesma vaga daria 57 e
 `MAYBE` na regra anterior.
 
+## Tela de revisão
+
+O pipeline parava no banco: para ler um rascunho era preciso `curl` ou `psql`.
+Como a etapa final é humana por design (nada é enviado automaticamente), faltava
+o lugar onde essa etapa acontece.
+
+`GET /review` serve HTML renderizado no servidor — sem build de frontend, sem
+dependência nova. A raiz redireciona para lá, porque é o que se quer ver ao
+abrir `localhost:3000`.
+
+Decisões:
+
+- **Fila de trabalho, não histórico.** `listProposalsForReview` exclui
+  `applied`/`won`/`lost`/`dismissed`; marcar como enviada tira o item da tela.
+- **Escape de HTML obrigatório.** Título e descrição vêm de páginas públicas de
+  terceiros e o corpo da proposta vem de um LLM — qualquer um dos dois pode
+  carregar `<script>`.
+- **Dimensão excluída aparece riscada**, com o aviso "score sobre N de 4
+  dimensões". Mostrar o `rate_fit: 0` como se fosse nota mentiria sobre o score.
+- **`<textarea>` em vez de `<pre>`**: o rascunho precisa de correção antes de ir
+  para o 99Freelas, e o modelo gratuito erra concordância com frequência.
+- O `navigator.clipboard` exige contexto seguro; em `http://` o botão seleciona
+  o texto e avisa "use Ctrl+C" em vez de falhar em silêncio.
+
 ## Próximos passos
 
 1. Reconferir a cadeia de modelos periodicamente: o tier gratuito do OpenRouter

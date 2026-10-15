@@ -32,6 +32,24 @@ POST /discovery/runs
 `MAYBE` e `SKIP` param no banco — gerar rascunho para tudo queimaria a cota gratuita em vagas que
 você não vai responder.
 
+O pipeline termina no rascunho. A última etapa é sua, em **<http://localhost:3000/review>**:
+ler, corrigir, copiar, colar no 99Freelas e marcar como enviada.
+
+## Tela de revisão
+
+<http://localhost:3000/review> (a raiz redireciona para lá) lista o que está esperando você,
+ordenado por score:
+
+- o rascunho em campo editável, com botão de copiar
+- score, tier e as dimensões — com a dimensão **riscada** quando saiu do cálculo
+  (ver "Dimensões não avaliáveis" abaixo)
+- a justificativa da triagem, pontos de atenção, skills em comum e as que faltam
+- perguntas sugeridas para o cliente
+- link para a vaga e botões para marcar como **enviada** ou **descartada**
+
+Marcar como enviada tira o item da fila — a tela é fila de trabalho, não histórico.
+Para o histórico, `GET /jobs?status=applied`.
+
 ## Stack
 
 | Componente | Tecnologia |
@@ -49,6 +67,7 @@ você não vai responder.
 lead-hunter/
 ├── apps/
 │   ├── api/                       # HTTP — valida input, enfileira, Bull Board
+│   │   └── src/review/page.ts     # tela de revisão (HTML server-rendered)
 │   └── worker/
 │       └── src/workers/
 │           ├── discovery.worker.ts  # scrape → banco → fila de triagem
@@ -175,6 +194,8 @@ A proposta sai estruturada, não como um blob de texto: `summary`, `body` (o que
 formulário), `key_points`, `questions`, `estimated_days`, `suggested_price`.
 
 ## API
+
+A tela de revisão cobre o uso normal. A API é para automação e inspeção.
 
 ```bash
 # Status geral

@@ -8,9 +8,11 @@ import {
   findJobPostingById,
   healthcheck,
   listJobPostings,
+  listProposalsForReview,
   updateJobPostingStatus,
   type JobPostingStatus,
 } from "@lead-hunter/database";
+import { renderReviewPage } from "./review/page.js";
 import { loadResumeProfile, saveResumeProfile } from "@lead-hunter/config/resume-profile.js";
 import { aiConfig } from "@lead-hunter/config/ai.js";
 import type { ResumeProfile } from "@lead-hunter/shared/models/resume-profile.js";
@@ -26,6 +28,19 @@ createBullBoard({
 
 const app = Fastify({ logger: false });
 app.register(serverAdapter.registerPlugin(), { prefix: "/queues" });
+
+/**
+ * Tela de revisão — a etapa humana do pipeline. O sistema para no rascunho
+ * (AGENT.md §14), então é aqui que você lê, copia, cola no 99Freelas e marca
+ * como enviada.
+ */
+app.get("/review", async (_req, reply) => {
+  const jobs = await listProposalsForReview();
+  return reply.type("text/html; charset=utf-8").send(renderReviewPage(jobs));
+});
+
+// A raiz é a tela de revisão: é o que se quer ver ao abrir localhost:3000.
+app.get("/", async (_req, reply) => reply.redirect("/review", 302));
 
 app.get("/resume-profile", async (_req, reply) => {
   const profile = await loadResumeProfile();

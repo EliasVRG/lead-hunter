@@ -245,6 +245,21 @@ export async function listJobPostings(filters: {
   return sql`SELECT * FROM job_postings WHERE ${where} ORDER BY score DESC NULLS LAST, created_at DESC` as unknown as Promise<JobPostingRow[]>;
 }
 
+/**
+ * Vagas com rascunho pronto, para a tela de revisão.
+ *
+ * Exclui `applied`/`won`/`lost` porque a tela é fila de trabalho, não
+ * histórico: o que já foi enviado sai dela. `dismissed` também sai.
+ */
+export async function listProposalsForReview(): Promise<JobPostingRow[]> {
+  return sql`
+    SELECT * FROM job_postings
+    WHERE proposal_draft IS NOT NULL
+      AND status NOT IN ('applied', 'won', 'lost', 'dismissed')
+    ORDER BY score DESC NULLS LAST, posted_at DESC NULLS LAST
+  ` as unknown as Promise<JobPostingRow[]>;
+}
+
 export async function updateJobPostingStatus(
   id: number,
   status: JobPostingStatus,
