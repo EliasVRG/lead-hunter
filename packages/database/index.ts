@@ -1,13 +1,8 @@
 import postgres from "postgres";
+import { dbConfig } from "@lead-hunter/config/db.js";
 import { logger } from "@lead-hunter/logger";
 
-const sql = postgres({
-  host: process.env.DB_HOST ?? "localhost",
-  port: Number(process.env.DB_PORT ?? 5432),
-  database: process.env.DB_NAME ?? "leads",
-  user: process.env.DB_USER ?? "lead",
-  password: process.env.DB_PASSWORD ?? "lead",
-});
+const sql = postgres(dbConfig);
 
 export interface Lead {
   id?: number;
@@ -81,6 +76,18 @@ export async function healthcheck(): Promise<boolean> {
   }
 }
 
+export const JOB_POSTING_STATUSES = [
+  "discovered",
+  "triaged",
+  "proposal_ready",
+  "applied",
+  "won",
+  "lost",
+  "dismissed",
+] as const;
+
+export type JobPostingStatus = (typeof JOB_POSTING_STATUSES)[number];
+
 export interface JobPostingRow {
   id?: number;
   platform: string;
@@ -95,15 +102,40 @@ export interface JobPostingRow {
   currency: string | null;
   client_name: string | null;
   client_rating: number | null;
+  client_reviews_count: number | null;
   proposals_count: number | null;
+  interested_count: number | null;
+  category: string | null;
+  subcategory: string | null;
+  experience_level: string | null;
+  is_urgent: boolean | null;
+  is_featured: boolean | null;
   posted_at: Date | null;
+  expires_at: Date | null;
+
+  // Contrato de triagem (packages/ai/contracts/triage.contract.ts)
   score: number | null;
   tier: string | null;
-  dimensions: any | null;
+  dimensions: Record<string, number> | null;
   reason: string | null;
   red_flags: string[] | null;
+  matched_skills: string[] | null;
+  missing_skills: string[] | null;
+  recommended_action: string | null;
+  confidence: number | null;
+  triage_model: string | null;
+
+  // Contrato de proposta (packages/ai/contracts/proposal.contract.ts)
   proposal_draft: string | null;
-  status: string;
+  proposal_summary: string | null;
+  proposal_key_points: string[] | null;
+  proposal_questions: string[] | null;
+  proposal_estimated_days: number | null;
+  proposal_suggested_price: number | null;
+  proposal_currency: string | null;
+  proposal_model: string | null;
+
+  status: JobPostingStatus;
   created_at?: Date;
   updated_at?: Date;
 }
@@ -118,6 +150,9 @@ export async function upsertJobPosting(job: Partial<JobPostingRow>): Promise<Job
   );
 
   const cols = entries.map(([k]) => k);
+  // Objetos (ex: `dimensions`) vão crus de propósito: o postgres.js já serializa
+  // objeto para json. Pré-serializar aqui gravaria a string JSON como escalar
+  // de texto dentro do jsonb, não como objeto.
   const vals = entries.map(([, v]) => v);
 
   const updates = cols
@@ -134,6 +169,45 @@ export async function upsertJobPosting(job: Partial<JobPostingRow>): Promise<Job
   );
 
   return result as unknown as JobPostingRow;
+}
+
+/**
+ * Atualiza uma vaga já existente, identificada por (platform, external_id).
+ *
+ * Os estágios de triagem e proposta usam isto em vez de `upsertJobPosting`:
+ * eles só têm campos parciais (score, rascunho) e não a vaga inteira. Um
+ * `INSERT ... ON CONFLICT DO UPDATE` parcial não funciona aqui porque o
+ * Postgres valida as restrições `NOT NULL` (url, title) ao formar a tupla
+ * proposta, antes de chegar à resolução do conflito — o insert estoura mesmo
+ * quando a linha já existe e a intenção era apenas atualizá-la.
+ *
+ * Retorna `null` quando nenhuma linha casa com a referência.
+ */
+export async function updateJobPostingByRef(
+  platform: string,
+  externalId: string,
+  fields: Partial<JobPostingRow>,
+): Promise<JobPostingRow | null> {
+  const entries = Object.entries(fields).filter(
+    ([k, v]) => k !== "id" && k !== "platform" && k !== "external_id" && v !== undefined,
+  );
+
+  if (entries.length === 0) {
+    return findJobPostingByPlatformAndExternalId(platform, externalId);
+  }
+
+  const assignments = entries.map(([k], i) => `${k} = $${i + 1}`);
+  const values = entries.map(([, v]) => v);
+
+  const [result] = await sql.unsafe(
+    `UPDATE job_postings
+     SET ${assignments.join(", ")}, updated_at = NOW()
+     WHERE platform = $${values.length + 1} AND external_id = $${values.length + 2}
+     RETURNING *`,
+    [...values, platform, externalId],
+  );
+
+  return (result ?? null) as unknown as JobPostingRow | null;
 }
 
 export async function findJobPostingByPlatformAndExternalId(
@@ -171,7 +245,7 @@ export async function listJobPostings(filters: {
 
 export async function updateJobPostingStatus(
   id: number,
-  status: string,
+  status: JobPostingStatus,
 ): Promise<JobPostingRow | null> {
   const [result] = await sql`
     UPDATE job_postings SET status = ${status}, updated_at = NOW()

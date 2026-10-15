@@ -1,48 +1,30 @@
 import Fastify from "fastify";
-import { addJob, JobType, leadQueue } from "@lead-hunter/queue";
-import { findLeadByWebsite, healthcheck, listJobPostings, updateJobPostingStatus } from "@lead-hunter/database";
+import { createBullBoard } from "@bull-board/api";
+import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
+import { FastifyAdapter } from "@bull-board/fastify";
+import { allQueues, enqueueDiscovery, queueCounts } from "@lead-hunter/queue";
+import {
+  JOB_POSTING_STATUSES,
+  healthcheck,
+  listJobPostings,
+  updateJobPostingStatus,
+  type JobPostingStatus,
+} from "@lead-hunter/database";
 import { loadResumeProfile, saveResumeProfile } from "@lead-hunter/config/resume-profile.js";
+import { aiConfig } from "@lead-hunter/config/ai.js";
 import type { ResumeProfile } from "@lead-hunter/shared/models/resume-profile.js";
 import { logger } from "@lead-hunter/logger";
-import { createBullBoard } from "@bull-board/api";
-import { FastifyAdapter } from "@bull-board/fastify";
-import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 
 const serverAdapter = new FastifyAdapter();
 serverAdapter.setBasePath("/queues");
 
 createBullBoard({
-  queues: [new BullMQAdapter(leadQueue)],
+  queues: allQueues.map((queue) => new BullMQAdapter(queue)),
   serverAdapter,
 });
 
 const app = Fastify({ logger: false });
 app.register(serverAdapter.registerPlugin(), { prefix: "/queues" });
-
-// Deprecated: kept only until the job-hunter migration (specs/completed/fase_00_pivot_job_hunter.md)
-// is validated end to end. Do not add new features to this route — use /discovery/runs instead.
-app.post<{ Body: { name?: string; website: string; city?: string } }>(
-  "/leads",
-  async (req, reply) => {
-    const { name, website, city } = req.body;
-
-    if (!website) {
-      return reply.status(400).send({ error: "website is required" });
-    }
-
-    const existing = await findLeadByWebsite(website);
-    if (existing) {
-      logger.info({ website }, "duplicate lead rejected");
-      return reply.status(409).send({ error: "lead already exists", lead: existing });
-    }
-
-    const lead = { name, website, city };
-    const job = await addJob(JobType.Scrape, lead);
-    logger.info({ jobId: job.id, website }, "lead enqueued");
-
-    return reply.status(202).send({ jobId: job.id, lead });
-  },
-);
 
 app.get("/resume-profile", async (_req, reply) => {
   const profile = await loadResumeProfile();
@@ -53,19 +35,21 @@ app.get("/resume-profile", async (_req, reply) => {
 });
 
 app.post<{ Body: Partial<ResumeProfile> }>("/resume-profile", async (req, reply) => {
-  const body = req.body;
+  const body = req.body ?? {};
 
   if (!body.name || !body.headline || !body.seniority) {
     return reply.status(400).send({ error: "name, headline and seniority are required" });
   }
 
-  const profile: ResumeProfile = {
+  const saved = await saveResumeProfile({
     name: body.name,
     headline: body.headline,
     seniority: body.seniority,
     skills: body.skills ?? [],
     roles: body.roles ?? [],
     stack: body.stack ?? [],
+    minRateHr: body.minRateHr ?? null,
+    maxRateHr: body.maxRateHr ?? null,
     minRate: body.minRate ?? null,
     maxRate: body.maxRate ?? null,
     currency: body.currency ?? "BRL",
@@ -73,25 +57,35 @@ app.post<{ Body: Partial<ResumeProfile> }>("/resume-profile", async (req, reply)
     remotePreference: body.remotePreference ?? "remote-only",
     languages: body.languages ?? [],
     bio: body.bio ?? "",
-  };
+    highlights: body.highlights ?? [],
+    openSource: body.openSource ?? [],
+    links: body.links ?? {},
+  });
 
-  const saved = await saveResumeProfile(profile);
   logger.info({ name: saved.name }, "resume profile saved");
-
   return reply.status(200).send(saved);
 });
 
-app.post<{ Body: { searchUrl?: string; maxListings?: number } }>(
-  "/discovery/runs",
-  async (req, reply) => {
-    const { searchUrl, maxListings } = req.body ?? {};
+/**
+ * Dispara um ciclo de descoberta. A API só enfileira — scraping e IA acontecem
+ * no worker (AGENT.md §1.3).
+ */
+app.post<{
+  Body: {
+    query?: string;
+    category?: string;
+    maxPages?: number;
+    maxListings?: number;
+    maxAgeHours?: number;
+    fetchDetails?: boolean;
+    searchUrl?: string;
+  };
+}>("/discovery/runs", async (req, reply) => {
+  const body = req.body ?? {};
+  const job = await enqueueDiscovery(body);
 
-    const job = await addJob(JobType.Scrape, { searchUrl, maxListings });
-    logger.info({ jobId: job.id }, "discovery run enqueued");
-
-    return reply.status(202).send({ jobId: job.id });
-  },
-);
+  return reply.status(202).send({ jobId: job.id, queue: "discovery", options: body });
+});
 
 app.get<{ Querystring: { tier?: string; status?: string } }>("/jobs", async (req, reply) => {
   const { tier, status } = req.query;
@@ -99,18 +93,22 @@ app.get<{ Querystring: { tier?: string; status?: string } }>("/jobs", async (req
   return reply.status(200).send(jobs);
 });
 
-app.patch<{ Params: { id: string }; Body: { status: string } }>(
+app.patch<{ Params: { id: string }; Body: { status?: string } }>(
   "/jobs/:id/status",
   async (req, reply) => {
     const id = Number(req.params.id);
-    const { status } = req.body ?? {};
-
-    const validStatuses = ["discovered", "reviewing", "proposal_ready", "applied", "won", "lost", "dismissed"];
-    if (!status || !validStatuses.includes(status)) {
-      return reply.status(400).send({ error: `status must be one of: ${validStatuses.join(", ")}` });
+    if (!Number.isInteger(id)) {
+      return reply.status(400).send({ error: "id must be an integer" });
     }
 
-    const updated = await updateJobPostingStatus(id, status);
+    const { status } = req.body ?? {};
+    if (!status || !JOB_POSTING_STATUSES.includes(status as JobPostingStatus)) {
+      return reply
+        .status(400)
+        .send({ error: `status must be one of: ${JOB_POSTING_STATUSES.join(", ")}` });
+    }
+
+    const updated = await updateJobPostingStatus(id, status as JobPostingStatus);
     if (!updated) {
       return reply.status(404).send({ error: "job posting not found" });
     }
@@ -119,14 +117,26 @@ app.patch<{ Params: { id: string }; Body: { status: string } }>(
   },
 );
 
+/** Visão rápida do pipeline sem abrir o Bull Board. */
+app.get("/queues/status", async (_req, reply) => {
+  return reply.status(200).send(await queueCounts());
+});
+
 app.get("/health", async (_req, reply) => {
   const dbOk = await healthcheck();
-  const status = dbOk ? "ok" : "degraded";
-  const code = dbOk ? 200 : 503;
-  return reply.status(code).send({ status, database: dbOk ? "up" : "down" });
+  const aiConfigured = Boolean(aiConfig.openrouter.apiKey);
+
+  return reply.status(dbOk ? 200 : 503).send({
+    status: dbOk && aiConfigured ? "ok" : "degraded",
+    database: dbOk ? "up" : "down",
+    // Sem chave, descoberta funciona mas triagem e proposta falham — vale
+    // aparecer aqui em vez de só estourar no worker.
+    openrouter: aiConfigured ? "configured" : "missing OPENROUTER_API_KEY",
+    models: aiConfig.openrouter.models,
+  });
 });
 
 const port = Number(process.env.API_PORT ?? 3000);
 app.listen({ port, host: "0.0.0.0" }).then(() => {
-  logger.info({ port }, "api started");
+  logger.info({ port, bullBoard: `http://localhost:${port}/queues` }, "api started");
 });

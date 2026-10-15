@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16
@@ -8,7 +6,9 @@ services:
       POSTGRES_PASSWORD: lead
       POSTGRES_DB: leads
     ports:
-      - "5432:5432"
+      # Porta não-padrão no host para não colidir com outro Postgres local.
+      # Deve bater com DB_PORT/DATABASE_URL no .env.
+      - "5442:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./packages/database/init.sql:/docker-entrypoint-initdb.d/init.sql

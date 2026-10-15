@@ -1,15 +1,75 @@
 {
   "name": "Elias Victor Rocha Garcia",
-  "headline": "Desenvolvedor Full Stack | PHP, React, Node.js e Oracle | APIs, Integrações e Observabilidade",
+  "headline": "Desenvolvedor Full Stack | APIs, Integrações Corporativas e Observabilidade | Node.js · TypeScript · PHP · Oracle",
   "seniority": "junior-pleno",
-  "skills": ["PHP", "React", "JavaScript", "TypeScript", "Node.js", "Oracle SQL", "APIs REST", "Linux", "Observabilidade"],
-  "roles": ["Full Stack Developer", "Backend Developer"],
-  "stack": ["PHP", "React", "Node.js", "NestJS", "TypeScript", "Oracle SQL"],
-  "minRate": null,
-  "maxRate": null,
+  "skills": [
+    "PHP",
+    "React",
+    "JavaScript",
+    "TypeScript",
+    "Node.js",
+    "NestJS",
+    "Fastify",
+    "Svelte",
+    "Oracle SQL",
+    "PostgreSQL",
+    "MySQL",
+    "APIs REST",
+    "Linux",
+    "Docker",
+    "Observabilidade",
+    "Debugging",
+    "Integração de Sistemas",
+    "RPA",
+    "Python",
+    "Redis",
+    "BullMQ",
+    "Cloudflare Workers",
+    "Vitest"
+  ],
+  "roles": [
+    "Full Stack Developer",
+    "Backend Developer"
+  ],
+  "stack": [
+    "PHP",
+    "React",
+    "Node.js",
+    "NestJS",
+    "TypeScript",
+    "Oracle SQL",
+    "PostgreSQL",
+    "Docker",
+    "Python"
+  ],
+  "minRateHr": 15,
+  "maxRateHr": 30,
   "currency": "BRL",
-  "availability": null,
-  "remotePreference": null,
-  "languages": ["Português"],
-  "bio": "Desenvolvedor Full Stack com quase 2 anos construindo e mantendo sistemas corporativos, do banco de dados (Oracle SQL) à interface (React/TypeScript), incluindo APIs REST, integrações entre sistemas e observabilidade em produção (rastreamento de erros com Bugsink, logs centralizados). Criador de biblioteca open-source de validação e sanitização de imagens para backend, com foco em confiabilidade e segurança de pipelines de upload."
+  "availability": "immediate",
+  "remotePreference": "remote",
+  "languages": [
+    "Português",
+    "Inglês (leitura técnica)"
+  ],
+  "bio": "Desenvolvedor Full Stack com 3 anos de experiência construindo e mantendo sistemas corporativos de ponta a ponta. Atuo com PHP, React, TypeScript, Node.js e Oracle SQL, com foco em integrações com sistemas externos, APIs REST e observabilidade em produção. Meu diferencial está em investigar problemas na raiz com dados: identifiquei integração com ERP travada há 3 meses sem diagnóstico, instrumentei com logging estruturado e correlationId e provei a causa-raiz com evidência concreta em dias. Em outro caso, encontrei loop infinito reprocessando 33 mil registros por dia e reestruturei a lógica de sincronização eliminando o problema na origem. Desenvolvi e publiquei biblioteca open source em TypeScript para sanitização de imagens no backend (GitHub/NPM) e uma PWA offline-first com sincronização multi-dispositivo e backend em Cloudflare Workers.",
+  "highlights": [
+    "Investigação e resolução de integrações corporativas complexas com ERP e sistemas externos",
+    "Criação de sistema de logging estruturado com correlationId para diagnóstico de causa-raiz",
+    "Identificação de loop infinito reprocessando 33k registros/dia e reestruturação da lógica de sincronização",
+    "Biblioteca open source publicada no NPM: validação e sanitização de imagens no backend",
+    "PWA offline-first com sincronização multi-dispositivo e resolução de conflitos (Cloudflare Workers, D1, R2)",
+    "Referência técnica de regras de negócio no time atual"
+  ],
+  "openSource": [
+    {
+      "name": "img-sanitizer",
+      "url": "https://github.com/EliasVRG/img-sanitizer",
+      "description": "Biblioteca TypeScript para validação, reparo e sanitização de imagens no backend"
+    }
+  ],
+  "links": {
+    "github": "https://github.com/EliasVRG",
+    "linkedin": "https://linkedin.com/in/elias-victor-rocha-garcia-00243521b",
+    "portfolio": "https://elias-vrg-portifolio.vercel.app"
+  }
 }

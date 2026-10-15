@@ -34,6 +34,8 @@ describe("ResumeProfile file storage", () => {
       skills: ["Node.js"],
       roles: ["Backend Developer"],
       stack: ["Node.js", "TypeScript"],
+      minRateHr: 60,
+      maxRateHr: 120,
       minRate: 1000,
       maxRate: 5000,
       currency: "BRL",

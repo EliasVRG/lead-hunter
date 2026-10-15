@@ -35,5 +35,22 @@ export type { PerformanceMetrics } from "./lighthouse.js";
 export { crawlPage } from "./metadata.js";
 export type { FullMetadata, SocialLinks } from "./metadata.js";
 export { isAllowedByRobots, isPathAllowed } from "./robots.js";
-export { scrape99Freelas, discoverJobUrls, scrapeJobDetail, parseBudget, extractExternalId } from "./platforms/99freelas.js";
-export type { ScrapedJobPosting, DiscoveryOptions } from "./platforms/99freelas.js";
+export {
+  BASE_URL,
+  PLATFORM,
+  buildListingUrl,
+  enrichWithDetail,
+  extractExternalId,
+  fetchListingPage,
+  parseBudget,
+  parseDetailPage,
+  parseLastPage,
+  parseListingPage,
+  scrape99Freelas,
+} from "./platforms/99freelas/index.js";
+export type {
+  BudgetType,
+  DiscoveryOptions,
+  JobDetailFields,
+  ScrapedJobPosting,
+} from "./platforms/99freelas/index.js";

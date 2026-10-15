@@ -148,30 +148,37 @@ Nenhum código pode existir fora de:
 
 # ⚙️ 5. QUEUE CONTRACT
 
-Todos os jobs devem seguir padrão:
+Uma fila BullMQ **por estágio**, não uma fila genérica com `type` no payload.
+Os estágios têm naturezas diferentes (descoberta é I/O de rede serial; triagem e
+proposta batem em rate limit de IA), então concorrência, retry e profundidade são
+configurados por estágio — e o Bull Board passa a mostrar onde o trabalho parou.
 
-```ts
-{
-  id: string,
-  type: "scrape" | "ai-score" | "enrichment" | "proposal-draft",
-  payload: object,
-  attempts: number,
-  createdAt: Date
-}
-```
+| Fila | Payload | Enfileirada por |
+|------|---------|-----------------|
+| `discovery` | `DiscoveryJobData` (query, category, maxPages, maxListings, maxAgeHours) | `POST /discovery/runs` |
+| `triage` | `{ platform, externalId }` | `discovery.worker` — só vagas sem score |
+| `proposal` | `{ platform, externalId, score? }` | `triage.worker` — só tier `APPLY` |
 
-* `scrape` → descoberta de vagas em uma plataforma (ex: 99Freelas)
-* `ai-score` → cálculo do match entre uma vaga e o perfil/currículo do usuário
-* `enrichment` → enriquecimento opcional de dados da vaga/cliente (reservado; não usado no MVP do pivot)
-* `proposal-draft` → geração de rascunho de proposta para vagas com tier de alta compatibilidade
+Contratos em `packages/queue/index.ts`. Enfileirar é sempre via
+`enqueueDiscovery` / `enqueueTriage` / `enqueueProposal`, nunca `queue.add` direto.
+
+`triage` e `proposal` usam `jobId` determinístico (`jobIdFor`) para que a mesma
+vaga não seja pontuada duas vezes. Duas armadilhas do BullMQ aí:
+
+* o separador **não pode ser `:`** — é reservado para as chaves do Redis
+* um `add` cujo `jobId` já existe é ignorado **em silêncio**, inclusive quando o
+  job existente está `failed`. Como as falhas são retidas de propósito, isso
+  travaria a vaga para sempre — `releaseFinishedJobId` descarta o job já
+  finalizado antes de enfileirar
 
 ---
 
 ## Retry policy
 
-* maxAttempts: 3
-* exponential backoff
-* dead-letter queue for failures
+* maxAttempts: 3 (`QUEUE_ATTEMPTS`)
+* exponential backoff, delay base 5s (`QUEUE_BACKOFF_DELAY_MS`)
+* `removeOnFail: false` — falhas ficam retidas para inspeção e reprocessamento
+  pelo Bull Board
 
 ---
 
@@ -179,38 +186,61 @@ Todos os jobs devem seguir padrão:
 
 ## 6.1 Output must be structured
 
-Toda resposta de IA deve seguir schema validado:
+Todo output de IA tem um contrato em `packages/ai/contracts/`, e cada contrato
+tem **duas** camadas:
 
-```json
-{
-  "score": number,
-  "reason": string,
-  "tags": string[],
-  "confidence": number
-}
-```
+* **schema de aceitação** (`rawTriageSchema`) — frouxo de propósito: aceita
+  número fracionário, string numérica, valor fora de faixa. Modelos gratuitos
+  erram esses detalhes com frequência, e gastar uma chamada extra para corrigir
+  algo que sabemos consertar deterministicamente desperdiça cota.
+* **contrato final** (`triageResultSchema`) — o que workers e banco consomem.
+
+O normalizador (`normalizeTriage`, `normalizeProposal`) é a fronteira entre os
+dois. Campos que o sistema impõe, por mais que o modelo os tenha escrito:
+
+| Campo | Regra |
+|-------|-------|
+| `score` | Recalculado como a soma das dimensões |
+| `tier` | Derivado do score pelos limiares de `TIER_THRESHOLDS` |
+| `dimensions.*` | Arredondadas e limitadas a `DIMENSION_WEIGHTS` |
+| `confidence` | Reescalada de 0-100 para 0-1 quando vem em porcentagem |
+
+Mudar os pesos em `DIMENSION_WEIGHTS` muda a rubrica do prompt e o schema
+enviado ao provider — os três leem a mesma constante.
 
 ---
 
-## 6.2 AI providers
+## 6.2 AI provider
 
-O sistema pode usar:
-
-* Gemini
-* OpenRouter
-* Ollama
-
-A seleção é feita por config:
+**Só OpenRouter.** Ele já é um roteador para dezenas de modelos, inclusive os
+gratuitos; manter provedores irmãos duplicaria a abstração que ele oferece.
+Trocar de modelo é editar o `.env`:
 
 ```env
-AI_PROVIDER=gemini
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODELS=modelo-a:free,modelo-b:free
+```
+
+`OPENROUTER_MODELS` é uma **cadeia de fallback**. Dentro de cada modelo o cliente
+tenta três modos de output em ordem decrescente de garantia —
+`json_schema` → `json_object` → schema inline no prompt — porque nem todo modelo
+gratuito aceita `response_format`. Cair de modo não perde garantia real: o
+contrato é imposto localmente pelo normalizador.
+
+O tier gratuito tem cota **por modelo**, então esgotar um e passar ao próximo é o
+que mantém o pipeline vivo. Para revalidar a lista de modelos gratuitos:
+
+```bash
+curl -s https://openrouter.ai/api/v1/models | jq '.data[] | select(.id | endswith(":free")) | {id, supported_parameters}'
 ```
 
 ---
 
 ## 6.3 No free-form AI usage
 
-Nenhuma chamada de IA pode ser feita sem schema definido.
+Nenhuma chamada de IA pode ser feita sem contrato definido. Em termos práticos:
+nenhuma chamada fora de `OpenRouterProvider`, cuja API exige um
+`responseFormat` e um `normalize`.
 
 ---
 
@@ -231,27 +261,33 @@ uma abordagem compatível com os termos de uso (ex: parsing de e-mail/RSS de job
 
 ---
 
-Scraping outputs (job postings) must be:
+Scraping outputs seguem `ScrapedJobPosting`
+(`packages/scraper/platforms/99freelas/types.ts`) — o tipo é a fonte da verdade,
+não este bloco.
 
-```json
-{
-  "platform": string,
-  "externalId": string,
-  "url": string,
-  "title": string,
-  "description": string,
-  "skills": string[],
-  "budgetType": "fixed" | "hourly" | "unknown",
-  "budgetMin": number | null,
-  "budgetMax": number | null,
-  "currency": string | null,
-  "clientName": string | null,
-  "clientRating": number | null,
-  "proposalsCount": number | null,
-  "postedAt": string,
-  "status": number
-}
-```
+Notas de implementação do 99Freelas, que não são óbvias pelo tipo:
+
+* A URL de listagem é **`/projects`**. `/projetos` devolve 404.
+* As páginas são **renderizadas no servidor** — é `fetch` + `cheerio`, não
+  Playwright. Subir um Chromium para ler markup estático custaria segundos e
+  megabytes por run.
+* A listagem já traz **tudo menos o orçamento**, inclusive a descrição integral
+  no atributo `data-content` (o texto visível é truncado). Só o orçamento exige
+  a página de detalhe.
+* Filtros que funcionam como query string: `page`, `q`, `categoria`. Ordenação,
+  data de publicação e ranking do cliente são aplicados via XHR na UI e não têm
+  equivalente em GET — idade de publicação é filtrada localmente
+  (`maxAgeHours`).
+* `budgetType` tem **`'open'`**: o cliente publicou sem definir faixa. É
+  diferente de `'unknown'`, que é "não conseguimos ler o campo".
+* `clientRating` é `null`, não `0`, para cliente sem histórico. O site manda
+  `data-score="0.0"` nesse caso, e manter o zero faria a IA tratar cliente novo
+  como cliente mal avaliado.
+
+Os parsers são funções puras testadas contra **fixtures de HTML real**
+(`tests/fixtures/99freelas/`). Ao mexer em seletor, capture uma fixture nova
+primeiro — testes verdes contra fixture antiga não dizem nada sobre o site de
+hoje.
 
 ---
 

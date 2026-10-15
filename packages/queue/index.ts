@@ -1,72 +1,173 @@
 import { Queue, Worker, type Job, type WorkerOptions } from "bullmq";
+import { queueConfig } from "@lead-hunter/config/queue.js";
 import { logger } from "@lead-hunter/logger";
 
+/**
+ * Três filas nomeadas em vez de uma fila genérica com `type` no payload.
+ *
+ * O pipeline tem estágios com características muito diferentes: descoberta é
+ * I/O de rede serial, triagem e proposta batem no rate limit do tier gratuito
+ * do OpenRouter. Filas separadas dão concorrência, retry e profundidade por
+ * estágio, e o Bull Board passa a mostrar onde o trabalho está parado — com
+ * uma fila só, "10 jobs pendentes" não diz se falta scrapear ou triar.
+ */
+export const QUEUE_NAMES = {
+  discovery: "discovery",
+  triage: "triage",
+  proposal: "proposal",
+} as const;
+
+export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
+
 const connection = {
-  host: process.env.REDIS_HOST ?? "localhost",
-  port: Number(process.env.REDIS_PORT ?? 6391),
+  host: queueConfig.redis.host,
+  port: queueConfig.redis.port,
 };
 
-export enum JobType {
-  Scrape = "scrape",
-  AiScore = "ai-score",
-  Enrichment = "enrichment",
-  ProposalDraft = "proposal-draft",
+/** Identifica uma vaga de forma estável entre estágios. */
+export interface JobRef {
+  platform: string;
+  externalId: string;
 }
 
-export interface JobPayload {
-  id: string;
-  type: JobType;
-  payload: Record<string, unknown>;
-  attempts: number;
-  createdAt: Date;
+export interface DiscoveryJobData {
+  query?: string;
+  category?: string;
+  maxPages?: number;
+  maxListings?: number;
+  maxAgeHours?: number;
+  fetchDetails?: boolean;
+  searchUrl?: string;
 }
 
-export const leadQueue = new Queue<JobPayload>("leads", {
+export interface TriageJobData extends JobRef {}
+
+export interface ProposalJobData extends JobRef {
+  /** Score que motivou o enfileiramento, só para rastreabilidade no Bull Board. */
+  score?: number;
+}
+
+const defaultJobOptions = {
+  attempts: queueConfig.attempts,
+  backoff: { type: "exponential" as const, delay: queueConfig.backoffDelayMs },
+  // Mantém um histórico curto de sucessos para inspeção no Bull Board; falhas
+  // ficam retidas porque são o que se quer reprocessar.
+  removeOnComplete: { count: 200 },
+  removeOnFail: false,
+};
+
+export const discoveryQueue = new Queue<DiscoveryJobData>(QUEUE_NAMES.discovery, {
   connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 2000 },
-    removeOnComplete: true,
-    removeOnFail: false,
-  },
+  defaultJobOptions,
 });
 
-export function createWorker(
-  handlers: Partial<Record<JobType, (job: Job<JobPayload>) => Promise<unknown>>>,
+export const triageQueue = new Queue<TriageJobData>(QUEUE_NAMES.triage, {
+  connection,
+  defaultJobOptions,
+});
+
+export const proposalQueue = new Queue<ProposalJobData>(QUEUE_NAMES.proposal, {
+  connection,
+  defaultJobOptions,
+});
+
+export const allQueues = [discoveryQueue, triageQueue, proposalQueue];
+
+export async function enqueueDiscovery(data: DiscoveryJobData) {
+  const job = await discoveryQueue.add("discover", data);
+  logger.info({ queue: QUEUE_NAMES.discovery, jobId: job.id, data }, "discovery job enqueued");
+  return job;
+}
+
+/**
+ * `jobId` determinístico por vaga: se a mesma vaga reaparecer numa segunda
+ * rodada de descoberta antes de ser triada, o BullMQ descarta o duplicado em
+ * vez de gastar duas chamadas de IA no mesmo projeto.
+ *
+ * O separador não pode ser `:` — o BullMQ o reserva para suas próprias chaves
+ * no Redis e rejeita o job com "Custom Id cannot contain :".
+ */
+export function jobIdFor({ platform, externalId }: JobRef): string {
+  return `${platform}__${externalId}`;
+}
+
+/**
+ * Libera um `jobId` ocupado por um job já finalizado.
+ *
+ * O BullMQ ignora silenciosamente um `add` cujo `jobId` já existe — inclusive
+ * quando o job existente está `failed`. Como as falhas são retidas de propósito
+ * (`removeOnFail: false`), sem essa limpeza uma vaga que falhou na triagem
+ * ficaria travada para sempre: toda redescoberta seria descartada como
+ * duplicada. Um job ainda `waiting`/`active`/`delayed` é preservado — aí o
+ * descarte do duplicado é justamente o que se quer.
+ */
+async function releaseFinishedJobId(queue: Queue<any, any, any>, jobId: string): Promise<void> {
+  const existing = await queue.getJob(jobId);
+  if (!existing) return;
+
+  const state = await existing.getState();
+  if (state === "failed" || state === "completed") {
+    await existing.remove();
+  }
+}
+
+export async function enqueueTriage(data: TriageJobData) {
+  const jobId = jobIdFor(data);
+  await releaseFinishedJobId(triageQueue, jobId);
+
+  const job = await triageQueue.add("triage", data, { jobId });
+  logger.info({ queue: QUEUE_NAMES.triage, jobId: job.id, ...data }, "triage job enqueued");
+  return job;
+}
+
+export async function enqueueProposal(data: ProposalJobData) {
+  const jobId = jobIdFor(data);
+  await releaseFinishedJobId(proposalQueue, jobId);
+
+  const job = await proposalQueue.add("proposal", data, { jobId });
+  logger.info({ queue: QUEUE_NAMES.proposal, jobId: job.id, ...data }, "proposal job enqueued");
+  return job;
+}
+
+export function createQueueWorker<T>(
+  name: QueueName,
+  processor: (job: Job<T>) => Promise<unknown>,
   opts?: Partial<WorkerOptions>,
-) {
-  const worker = new Worker<JobPayload>("leads", async (job) => {
-    const { type } = job.data;
-    const handler = handlers[type];
-    if (!handler) {
-      logger.warn({ jobId: job.id, type }, "no handler for job type, skipping");
-      return;
-    }
-    return handler(job);
-  }, { connection, ...opts });
+): Worker<T> {
+  const worker = new Worker<T>(name, processor, {
+    connection,
+    concurrency: queueConfig.concurrency[name],
+    ...opts,
+  });
 
   worker.on("completed", (job) => {
-    logger.info({ jobId: job.id, type: job.data.type }, "job completed");
+    logger.info({ queue: name, jobId: job.id }, "job completed");
   });
   worker.on("failed", (job, err) => {
-    logger.error({ jobId: job?.id, type: job?.data.type, error: err.message }, "job failed");
+    logger.error(
+      { queue: name, jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message },
+      "job failed",
+    );
   });
 
   return worker;
 }
 
-export async function addJob(
-  type: JobType,
-  payload: Record<string, unknown>,
-) {
-  const job: JobPayload = {
-    id: crypto.randomUUID(),
-    type,
-    payload,
-    attempts: 0,
-    createdAt: new Date(),
-  };
-  await leadQueue.add(type, job);
-  logger.info({ jobId: job.id, type }, "job enqueued");
-  return job;
+/** Contagens por estado de cada fila — usado pelo endpoint de status. */
+export async function queueCounts() {
+  const entries = await Promise.all(
+    allQueues.map(async (queue) => [
+      queue.name,
+      await queue.getJobCounts("waiting", "active", "completed", "failed", "delayed"),
+    ]),
+  );
+
+  return Object.fromEntries(entries) as Record<
+    QueueName,
+    Record<"waiting" | "active" | "completed" | "failed" | "delayed", number>
+  >;
+}
+
+export async function closeQueues(): Promise<void> {
+  await Promise.all(allQueues.map((queue) => queue.close()));
 }

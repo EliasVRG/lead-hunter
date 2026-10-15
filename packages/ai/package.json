@@ -8,7 +8,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
     "@lead-hunter/config": "*",
     "@lead-hunter/logger": "*",
     "@lead-hunter/shared": "*",

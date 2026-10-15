@@ -55,8 +55,13 @@ vi.mock("postgres", () => ({
   default: () => sqlMock,
 }));
 
-const { upsertJobPosting, listJobPostings, updateJobPostingStatus, findJobPostingByPlatformAndExternalId } =
-  await import("./index.js");
+const {
+  upsertJobPosting,
+  updateJobPostingByRef,
+  listJobPostings,
+  updateJobPostingStatus,
+  findJobPostingByPlatformAndExternalId,
+} = await import("./index.js");
 
 beforeEach(() => {
   sqlMock.mockClear();
@@ -108,6 +113,74 @@ describe("upsertJobPosting", () => {
     expect(query).not.toMatch(/platform = COALESCE/);
     expect(query).not.toMatch(/external_id = COALESCE/);
     expect(query).toMatch(/score = COALESCE\(EXCLUDED\.score, job_postings\.score\)/);
+  });
+});
+
+/**
+ * Triagem e proposta não podem usar o upsert: o Postgres valida as restrições
+ * NOT NULL (url, title) ao formar a tupla do INSERT, antes de resolver o
+ * ON CONFLICT — então um upsert com campos parciais estoura mesmo quando a
+ * linha já existe.
+ */
+describe("updateJobPostingByRef", () => {
+  it("issues a plain UPDATE scoped by (platform, external_id)", async () => {
+    nextResult = [{ id: 1, score: 76 }];
+
+    const result = await updateJobPostingByRef("99freelas", "791466", {
+      score: 76,
+      tier: "APPLY",
+      status: "triaged",
+    });
+
+    expect(result).toEqual({ id: 1, score: 76 });
+    const [query, values] = sqlMock.unsafe.mock.calls[0];
+    expect(query).toContain("UPDATE job_postings");
+    expect(query).not.toContain("INSERT");
+    expect(query).toContain("score = $1, tier = $2, status = $3");
+    expect(query).toContain("WHERE platform = $4 AND external_id = $5");
+    expect(values).toEqual([76, "APPLY", "triaged", "99freelas", "791466"]);
+  });
+
+  it("passes jsonb values as objects — postgres.js serializes them itself", async () => {
+    nextResult = [{ id: 1 }];
+    const dimensions = { skill_match: 38, rate_fit: 20, seniority_fit: 18, urgency: 14 };
+
+    await updateJobPostingByRef("99freelas", "791466", { dimensions });
+
+    // Pré-serializar gravaria a string JSON como escalar de texto no jsonb,
+    // não como objeto — o valor voltaria do banco como '"{\"skill_match\":38}"'.
+    const [, values] = sqlMock.unsafe.mock.calls[0];
+    expect(values[0]).toEqual(dimensions);
+    expect(typeof values[0]).toBe("object");
+  });
+
+  it("ignores attempts to rewrite the identifying columns", async () => {
+    nextResult = [{ id: 1 }];
+
+    await updateJobPostingByRef("99freelas", "791466", {
+      platform: "other",
+      external_id: "999",
+      score: 10,
+    });
+
+    const [query, values] = sqlMock.unsafe.mock.calls[0];
+    expect(query).toContain("score = $1");
+    expect(values).toEqual([10, "99freelas", "791466"]);
+  });
+
+  it("reads the row back instead of emitting an empty UPDATE", async () => {
+    nextResult = [{ id: 1 }];
+
+    await updateJobPostingByRef("99freelas", "791466", {});
+
+    expect(sqlMock.unsafe).not.toHaveBeenCalled();
+    const frag = sqlMock.mock.results.at(-1)!.value;
+    expect(frag.text).toContain("SELECT * FROM job_postings");
+  });
+
+  it("returns null when no row matches", async () => {
+    nextResult = [];
+    expect(await updateJobPostingByRef("99freelas", "missing", { score: 1 })).toBeNull();
   });
 });
 
