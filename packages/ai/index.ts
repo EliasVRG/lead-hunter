@@ -29,10 +29,17 @@ export {
   TIER_THRESHOLDS,
   TRIAGE_RESPONSE_FORMAT,
   normalizeTriage,
+  scoreFromDimensions,
   tierForScore,
   triageResultSchema,
+  unassessableDimensions,
 } from "./contracts/triage.contract.js";
-export type { DimensionKey, Tier, TriageResult } from "./contracts/triage.contract.js";
+export type {
+  DimensionKey,
+  Tier,
+  TriageContext,
+  TriageResult,
+} from "./contracts/triage.contract.js";
 
 export {
   PROPOSAL_RESPONSE_FORMAT,

@@ -2,9 +2,10 @@ import Fastify from "fastify";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { FastifyAdapter } from "@bull-board/fastify";
-import { allQueues, enqueueDiscovery, queueCounts } from "@lead-hunter/queue";
+import { allQueues, enqueueDiscovery, enqueueProposal, queueCounts } from "@lead-hunter/queue";
 import {
   JOB_POSTING_STATUSES,
+  findJobPostingById,
   healthcheck,
   listJobPostings,
   updateJobPostingStatus,
@@ -116,6 +117,37 @@ app.patch<{ Params: { id: string }; Body: { status?: string } }>(
     return reply.status(200).send(updated);
   },
 );
+
+/**
+ * Pede um rascunho de proposta para uma vaga específica, independente do tier.
+ *
+ * A triagem só enfileira proposta automaticamente para `APPLY`. Este endpoint é
+ * a saída manual: você leu uma `MAYBE`, gostou, e quer o rascunho sem esperar
+ * que o score suba.
+ */
+app.post<{ Params: { id: string } }>("/jobs/:id/proposal", async (req, reply) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    return reply.status(400).send({ error: "id must be an integer" });
+  }
+
+  const posting = await findJobPostingById(id);
+  if (!posting) {
+    return reply.status(404).send({ error: "job posting not found" });
+  }
+
+  const job = await enqueueProposal({
+    platform: posting.platform,
+    externalId: posting.external_id,
+    score: posting.score ?? undefined,
+  });
+
+  return reply.status(202).send({
+    jobId: job.id,
+    queue: "proposal",
+    posting: { id, title: posting.title, score: posting.score, tier: posting.tier },
+  });
+});
 
 /** Visão rápida do pipeline sem abrir o Bull Board. */
 app.get("/queues/status", async (_req, reply) => {

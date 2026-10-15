@@ -12,9 +12,8 @@ export const TIERS = ["SKIP", "MAYBE", "APPLY"] as const;
 export type Tier = (typeof TIERS)[number];
 
 /**
- * Pesos máximos de cada dimensão. O score final é a soma delas, então os pesos
- * somam 100 e mudar um deles muda a escala — os limiares de tier abaixo
- * assumem este total.
+ * Pesos máximos de cada dimensão. Somam 100, então uma vaga em que todas as
+ * dimensões são avaliáveis tem o score igual à soma delas.
  */
 export const DIMENSION_WEIGHTS = {
   skill_match: 40,
@@ -26,6 +25,33 @@ export const DIMENSION_WEIGHTS = {
 export type DimensionKey = keyof typeof DIMENSION_WEIGHTS;
 
 export const TIER_THRESHOLDS = { APPLY: 70, MAYBE: 40 } as const;
+
+/**
+ * Dimensões que devem sair do cálculo porque a vaga não traz o dado para
+ * avaliá-las.
+ *
+ * No 99Freelas quase todo projeto é publicado com orçamento "Aberto" — na
+ * primeira rodada real foram 14 de 14. Pontuar `rate_fit` pela metade nesse
+ * caso transformava a dimensão numa constante de 10 pontos: não media nada e
+ * ainda consumia 20 do teto, derrubando o score máximo possível para 75 e
+ * tornando o tier APPLY (>= 70) praticamente inalcançável.
+ *
+ * Em vez de fingir que avaliamos, declaramos que não: a dimensão é removida e o
+ * score é renormalizado sobre o que sobrou. Aí o score volta a significar
+ * "% de aderência no que deu para avaliar", e os limiares de tier continuam
+ * valendo sem ajuste.
+ *
+ * A decisão vem do `budget_type` do scraper, não do modelo — é um fato
+ * observável da vaga e não uma opinião.
+ */
+export interface TriageContext {
+  budgetType?: string | null;
+}
+
+export function unassessableDimensions(context: TriageContext = {}): DimensionKey[] {
+  const budgetUnknown = context.budgetType === "open" || context.budgetType === "unknown";
+  return budgetUnknown ? ["rate_fit"] : [];
+}
 
 /**
  * Schema de **aceitação** da resposta crua do modelo.
@@ -61,6 +87,12 @@ export interface TriageResult {
   score: number;
   tier: Tier;
   dimensions: Record<DimensionKey, number>;
+  /**
+   * Dimensões excluídas do score por falta de dado na vaga. Fica no resultado
+   * para a explicação não mentir: um score de 72 sobre três dimensões não é a
+   * mesma coisa que 72 sobre quatro.
+   */
+  unassessed: DimensionKey[];
   reason: string;
   red_flags: string[];
   matched_skills: string[];
@@ -78,6 +110,7 @@ export const triageResultSchema = z.object({
     seniority_fit: z.number().int().min(0).max(DIMENSION_WEIGHTS.seniority_fit),
     urgency: z.number().int().min(0).max(DIMENSION_WEIGHTS.urgency),
   }),
+  unassessed: z.array(z.enum(["skill_match", "rate_fit", "seniority_fit", "urgency"])),
   reason: z.string().min(1),
   red_flags: z.array(z.string()),
   matched_skills: z.array(z.string()),
@@ -97,21 +130,51 @@ export function tierForScore(score: number): Tier {
 }
 
 /**
+ * Score 0-100 a partir das dimensões, ignorando as não avaliáveis.
+ *
+ * Sem exclusões é a soma simples (os pesos somam 100). Com exclusões, é a soma
+ * das dimensões restantes dividida pela soma dos pesos restantes — mantendo a
+ * escala 0-100 e, com ela, o significado dos limiares de tier.
+ */
+export function scoreFromDimensions(
+  dimensions: Record<DimensionKey, number>,
+  unassessed: DimensionKey[] = [],
+): number {
+  const excluded = new Set(unassessed);
+  const keys = (Object.keys(DIMENSION_WEIGHTS) as DimensionKey[]).filter((k) => !excluded.has(k));
+
+  // Nenhuma dimensão avaliável: não há base para pontuar, e 0 (que viraria SKIP)
+  // afirmaria incompatibilidade em vez de admitir ignorância. Devolve o neutro
+  // do limiar MAYBE para a vaga cair na revisão manual.
+  if (keys.length === 0) return TIER_THRESHOLDS.MAYBE;
+
+  const earned = keys.reduce((total, key) => total + dimensions[key], 0);
+  const available = keys.reduce((total, key) => total + DIMENSION_WEIGHTS[key], 0);
+
+  return Math.round((earned / available) * 100);
+}
+
+/**
  * Converte a resposta crua no contrato final.
  *
  * Duas coisas o modelo **não** decide, por mais que as tenha escrito:
- * - `score` é recalculado como a soma das dimensões. Modelos pequenos erram
- *   essa soma com frequência, e um score que não corresponde às dimensões
- *   torna a explicação inútil.
+ * - `score` é recalculado a partir das dimensões. Modelos pequenos erram essa
+ *   soma com frequência, e um score que não corresponde às dimensões torna a
+ *   explicação inútil.
  * - `tier` é derivado do score pelos limiares. Senão o mesmo score produziria
  *   tiers diferentes entre modelos da cadeia de fallback, e é o tier que
  *   dispara a fila de proposta.
+ *
+ * Quando `context` marca dimensões como não avaliáveis (ver
+ * `unassessableDimensions`), elas saem do cálculo e o score é renormalizado
+ * sobre os pesos restantes — um score sobre 3 dimensões fica na mesma escala de
+ * um score sobre 4, e os limiares de tier seguem valendo.
  *
  * As red flags entram no score pelas dimensões (o prompt instrui isso) e não
  * rebaixam o tier automaticamente — um rebaixamento silencioso tornaria o
  * score exibido inconsistente com a decisão tomada.
  */
-export function normalizeTriage(raw: unknown): TriageResult {
+export function normalizeTriage(raw: unknown, context: TriageContext = {}): TriageResult {
   const parsed = rawTriageSchema.parse(raw);
 
   const dimensions = {
@@ -121,7 +184,8 @@ export function normalizeTriage(raw: unknown): TriageResult {
     urgency: clampInt(parsed.dimensions.urgency, 0, DIMENSION_WEIGHTS.urgency),
   };
 
-  const score = Object.values(dimensions).reduce((total, value) => total + value, 0);
+  const unassessed = unassessableDimensions(context);
+  const score = scoreFromDimensions(dimensions, unassessed);
 
   const dedupe = (items: string[]) =>
     [...new Set(items.map((item) => item.trim()).filter(Boolean))].slice(0, 12);
@@ -130,6 +194,7 @@ export function normalizeTriage(raw: unknown): TriageResult {
     score,
     tier: tierForScore(score),
     dimensions,
+    unassessed,
     reason: parsed.reason.trim(),
     red_flags: dedupe(parsed.red_flags),
     matched_skills: dedupe(parsed.matched_skills),
@@ -151,6 +216,13 @@ export const TRIAGE_RESPONSE_FORMAT = responseFormat(
     }),
     score: integerRange(0, 100, "Soma exata das quatro dimensões"),
     tier: enumField(TIERS, "SKIP se score<40, MAYBE se 40-69, APPLY se >=70"),
+    unassessed: {
+      type: "array",
+      description:
+        "Dimensões que a vaga não dá informação para avaliar; saem do cálculo. Vazio se tudo é avaliável",
+      items: { type: "string", enum: Object.keys(DIMENSION_WEIGHTS) },
+      maxItems: 4,
+    },
     reason: stringField("Em português, 2 a 4 frases justificando cada dimensão"),
     red_flags: stringArray("Sinais de golpe ou vaga ruim. Vazio se não houver", 6),
     matched_skills: stringArray("Skills da vaga que o profissional domina", 12),

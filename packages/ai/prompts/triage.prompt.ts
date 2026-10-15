@@ -117,8 +117,9 @@ Pontue cada dimensão dentro do seu máximo:
    profissional domina. Máximo só quando o núcleo técnico da vaga está coberto pelo stack dele.
    Perto de zero quando a vaga é de outra área (ex: design ou jurídico para um perfil de backend).
 2. rate_fit (0-${DIMENSION_WEIGHTS.rate_fit}) — orçamento da vaga contra a faixa aceita. Alto quando o orçamento
-   alcança ou supera o mínimo aceito. Baixo quando fica claramente abaixo. Se o orçamento for "aberto",
-   pontue a metade da faixa: é incerteza, não incompatibilidade.
+   alcança ou supera o mínimo aceito. Baixo quando fica claramente abaixo. Se o orçamento estiver
+   marcado como aberto ou não informado, pontue 0 e registre "rate_fit" em "unassessed": a dimensão
+   sai do cálculo em vez de contar como incompatibilidade.
 3. seniority_fit (0-${DIMENSION_WEIGHTS.seniority_fit}) — complexidade do escopo contra a senioridade dele.
    Penalize tanto vaga que exige mais do que ele tem quanto vaga que o subaproveita.
 4. urgency (0-${DIMENSION_WEIGHTS.urgency}) — vale agir agora? Poucas propostas concorrentes, publicação recente e
@@ -129,6 +130,9 @@ o escopo, pedido para o prestador pagar algo, descrição genérica demais para 
 de trabalho de graça como "teste", contato fora da plataforma, cliente sem nenhuma avaliação.
 As red flags devem estar refletidas nas notas das dimensões — não basta listá-las.
 
-Defina "score" como a soma exata das quatro dimensões e "tier" por esses limiares:
-score >= ${TIER_THRESHOLDS.APPLY} é APPLY, de ${TIER_THRESHOLDS.MAYBE} a ${TIER_THRESHOLDS.APPLY - 1} é MAYBE, abaixo de ${TIER_THRESHOLDS.MAYBE} é SKIP.`;
+Em "unassessed", liste as dimensões que a vaga não dá informação para avaliar — elas saem do
+cálculo do score em vez de contar como nota baixa. Lista vazia quando tudo é avaliável.
+
+Defina "score" como a soma exata das dimensões avaliáveis, reescalada para 0-100, e "tier" por
+esses limiares: score >= ${TIER_THRESHOLDS.APPLY} é APPLY, de ${TIER_THRESHOLDS.MAYBE} a ${TIER_THRESHOLDS.APPLY - 1} é MAYBE, abaixo de ${TIER_THRESHOLDS.MAYBE} é SKIP.`;
 }

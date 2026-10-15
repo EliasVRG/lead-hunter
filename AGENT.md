@@ -200,13 +200,28 @@ dois. Campos que o sistema impõe, por mais que o modelo os tenha escrito:
 
 | Campo | Regra |
 |-------|-------|
-| `score` | Recalculado como a soma das dimensões |
+| `score` | Calculado das dimensões, não lido da resposta |
 | `tier` | Derivado do score pelos limiares de `TIER_THRESHOLDS` |
 | `dimensions.*` | Arredondadas e limitadas a `DIMENSION_WEIGHTS` |
+| `unassessed` | Derivado do `budget_type` do scraper, não da resposta |
 | `confidence` | Reescalada de 0-100 para 0-1 quando vem em porcentagem |
 
 Mudar os pesos em `DIMENSION_WEIGHTS` muda a rubrica do prompt e o schema
 enviado ao provider — os três leem a mesma constante.
+
+**Dimensões não avaliáveis.** Quando a vaga não traz o dado de uma dimensão, ela
+sai do cálculo e o score é renormalizado sobre os pesos restantes
+(`scoreFromDimensions`), em vez de contar como nota baixa. Hoje isso vale para
+`rate_fit` quando o orçamento é `open`/`unknown` — no 99Freelas quase todo
+projeto é publicado com orçamento "Aberto", e tratar isso como meia-nota fixava
+a dimensão numa constante e derrubava o teto do score para 75, tornando `APPLY`
+inalcançável. O score passa a significar "% de aderência no que deu para
+avaliar", na mesma escala dos dois casos, e os limiares seguem valendo.
+
+A exclusão é decidida por `unassessableDimensions(context)` a partir de fato
+observável da vaga, nunca pelo que o modelo respondeu — o prompt pede
+`unassessed` só para o modelo pontuar 0 em vez de inventar meia-nota e para a
+justificativa dizer isso.
 
 ---
 

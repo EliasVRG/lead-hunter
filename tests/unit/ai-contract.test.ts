@@ -2,11 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   DIMENSION_WEIGHTS,
   PROPOSAL_RESPONSE_FORMAT,
+  TIER_THRESHOLDS,
   TRIAGE_RESPONSE_FORMAT,
   extractJson,
   normalizeProposal,
   normalizeTriage,
+  scoreFromDimensions,
   tierForScore,
+  unassessableDimensions,
 } from "@lead-hunter/ai";
 
 const validTriage = {
@@ -102,6 +105,107 @@ describe("normalizeTriage", () => {
 
   it("rejects an empty reason — an unexplained score is not usable", () => {
     expect(() => normalizeTriage({ ...validTriage, reason: "" })).toThrow();
+  });
+});
+
+/**
+ * No 99Freelas praticamente todo projeto é publicado com orçamento "Aberto"
+ * (14 de 14 na primeira rodada real). Contar `rate_fit` nesse caso fixava a
+ * dimensão num valor constante e derrubava o teto do score para 75, tornando
+ * APPLY (>= 70) quase inalcançável. Daí a renormalização.
+ */
+describe("unassessableDimensions", () => {
+  it.each(["open", "unknown"])("drops rate_fit when the budget is %s", (budgetType) => {
+    expect(unassessableDimensions({ budgetType })).toEqual(["rate_fit"]);
+  });
+
+  it.each(["fixed", "hourly"])("keeps every dimension when the budget is %s", (budgetType) => {
+    expect(unassessableDimensions({ budgetType })).toEqual([]);
+  });
+
+  it("assesses everything when no context is given", () => {
+    // Um orçamento ilegível chega como 'unknown' do scraper, não como null —
+    // `null` aqui significa "ninguém passou contexto", e aí o comportamento
+    // conservador é não excluir nada.
+    expect(unassessableDimensions({})).toEqual([]);
+    expect(unassessableDimensions({ budgetType: null })).toEqual([]);
+  });
+});
+
+describe("scoreFromDimensions", () => {
+  const perfect = { skill_match: 40, rate_fit: 20, seniority_fit: 20, urgency: 20 };
+
+  it("sums the dimensions when all are assessable", () => {
+    expect(scoreFromDimensions(perfect)).toBe(100);
+    expect(scoreFromDimensions({ ...perfect, skill_match: 20 })).toBe(80);
+  });
+
+  it("rescales to 0-100 over the remaining weights", () => {
+    // 38 + 18 + 5 = 61 de 80 disponíveis -> 76, não 61.
+    const score = scoreFromDimensions(
+      { skill_match: 38, rate_fit: 0, seniority_fit: 18, urgency: 5 },
+      ["rate_fit"],
+    );
+    expect(score).toBe(76);
+  });
+
+  it("ignores whatever the excluded dimension scored", () => {
+    const dims = { skill_match: 30, rate_fit: 20, seniority_fit: 15, urgency: 10 };
+    expect(scoreFromDimensions(dims, ["rate_fit"])).toBe(
+      scoreFromDimensions({ ...dims, rate_fit: 0 }, ["rate_fit"]),
+    );
+  });
+
+  it("still reaches 100 when every assessable dimension is maxed", () => {
+    expect(scoreFromDimensions({ ...perfect, rate_fit: 0 }, ["rate_fit"])).toBe(100);
+  });
+
+  it("falls back to the MAYBE threshold when nothing can be assessed", () => {
+    // 0 viraria SKIP, afirmando incompatibilidade onde há só ignorância.
+    const score = scoreFromDimensions({ skill_match: 0, rate_fit: 0, seniority_fit: 0, urgency: 0 }, [
+      "skill_match",
+      "rate_fit",
+      "seniority_fit",
+      "urgency",
+    ]);
+    expect(score).toBe(TIER_THRESHOLDS.MAYBE);
+    expect(tierForScore(score)).toBe("MAYBE");
+  });
+});
+
+describe("normalizeTriage with an open budget", () => {
+  const dims = { skill_match: 38, rate_fit: 0, seniority_fit: 18, urgency: 5 };
+
+  it("renormalizes the score and records the excluded dimension", () => {
+    const result = normalizeTriage(
+      { ...validTriage, dimensions: dims },
+      { budgetType: "open" },
+    );
+
+    expect(result.unassessed).toEqual(["rate_fit"]);
+    expect(result.score).toBe(76);
+    expect(result.tier).toBe("APPLY");
+  });
+
+  it("would have scored the same job below APPLY without renormalization", () => {
+    const result = normalizeTriage({ ...validTriage, dimensions: dims }, { budgetType: "fixed" });
+
+    expect(result.unassessed).toEqual([]);
+    expect(result.score).toBe(61);
+    expect(result.tier).toBe("MAYBE");
+  });
+
+  it("keeps the raw dimension values visible for the explanation", () => {
+    const result = normalizeTriage({ ...validTriage, dimensions: dims }, { budgetType: "open" });
+    expect(result.dimensions).toEqual(dims);
+  });
+
+  it("ignores an `unassessed` claimed by the model — the budget type decides", () => {
+    const result = normalizeTriage(
+      { ...validTriage, dimensions: dims, unassessed: ["skill_match", "urgency"] },
+      { budgetType: "open" },
+    );
+    expect(result.unassessed).toEqual(["rate_fit"]);
   });
 });
 

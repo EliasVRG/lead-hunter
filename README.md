@@ -135,14 +135,41 @@ schema de aceitação (frouxo, tolera os erros típicos de modelo pequeno) do co
 | Campo | Quem decide |
 |-------|-------------|
 | `dimensions.*` | o modelo, arredondado e limitado ao peso máximo |
-| `score` | **o sistema** — soma das dimensões, não o número que o modelo escreveu |
+| `score` | **o sistema** — calculado das dimensões, não o número que o modelo escreveu |
 | `tier` | **o sistema** — derivado do score pelos limiares |
+| `unassessed` | **o sistema** — derivado do `budget_type` do scraper |
 | `confidence` | o modelo, reescalado para 0-1 |
 | `reason`, `red_flags`, `matched_skills`, `missing_skills` | o modelo, deduplicado |
 
 Score recalculado porque um score que não corresponde às dimensões torna a explicação inútil;
 tier derivado porque é ele que dispara a fila de proposta e o mesmo score tem que dar o mesmo
 tier em qualquer modelo da cadeia.
+
+### Dimensões não avaliáveis
+
+No 99Freelas quase todo projeto é publicado com orçamento **"Aberto"** — na primeira rodada real
+foram 14 de 14. Pontuar `rate_fit` pela metade nesse caso virava uma constante de 10 pontos: não
+media nada e ainda consumia 20 do teto, derrubando o score máximo para 75 e tornando `APPLY`
+(≥ 70) quase inalcançável.
+
+Então a dimensão sai do cálculo e o score é renormalizado sobre os pesos restantes:
+
+```
+orçamento "Aberto"  →  score = (skill_match + seniority_fit + urgency) / 80 × 100
+```
+
+O score volta a significar **"% de aderência no que deu para avaliar"**, na mesma escala de uma
+vaga com orçamento definido, e os limiares de tier seguem valendo sem ajuste. A exclusão é
+decidida pelo `budget_type` que o scraper extraiu — fato observável da vaga, não opinião do
+modelo — e fica registrada em `unassessed_dimensions` para a explicação não mentir: 71 sobre três
+dimensões não é a mesma coisa que 71 sobre quatro.
+
+| Campo | Peso | Nota |
+|-------|------|------|
+| `skill_match` | 40 | |
+| `rate_fit` | 20 | sai do cálculo quando o orçamento é "Aberto" ou ilegível |
+| `seniority_fit` | 20 | |
+| `urgency` | 20 | fica estruturalmente baixa: todo projeto tem dezenas de propostas |
 
 A proposta sai estruturada, não como um blob de texto: `summary`, `body` (o que vai colado no
 formulário), `key_points`, `questions`, `estimated_days`, `suggested_price`.
@@ -170,6 +197,10 @@ curl -X POST localhost:3000/discovery/runs -H "Content-Type: application/json" -
 # Vagas descobertas
 curl "localhost:3000/jobs?tier=APPLY"
 curl "localhost:3000/jobs?status=proposal_ready"
+
+# Rascunho sob demanda: você leu uma MAYBE, gostou, e quer a proposta
+# sem esperar o score subir (a triagem só enfileira APPLY automaticamente)
+curl -X POST localhost:3000/jobs/62/proposal
 
 # Marca como enviada, depois de revisar e enviar manualmente
 curl -X PATCH localhost:3000/jobs/1/status \

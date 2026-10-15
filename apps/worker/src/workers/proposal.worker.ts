@@ -14,6 +14,7 @@ function triageFromRow(row: {
   score: number | null;
   tier: string | null;
   dimensions: unknown;
+  unassessed_dimensions: string[] | null;
   reason: string | null;
   red_flags: string[] | null;
   matched_skills: string[] | null;
@@ -27,6 +28,7 @@ function triageFromRow(row: {
     score: row.score,
     tier: row.tier as TriageResult["tier"],
     dimensions: (row.dimensions ?? {}) as TriageResult["dimensions"],
+    unassessed: (row.unassessed_dimensions ?? []) as TriageResult["unassessed"],
     reason: row.reason ?? "",
     red_flags: row.red_flags ?? [],
     matched_skills: row.matched_skills ?? [],

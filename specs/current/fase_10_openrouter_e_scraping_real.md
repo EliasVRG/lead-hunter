@@ -127,15 +127,54 @@ agora responde.
 - [x] Tier `APPLY` chega à fila de proposta; `MAYBE`/`SKIP` param no banco
 - [x] Contrato imposto localmente: score recalculado, tier derivado, dimensões
       limitadas, JSON recuperado de fences e prosa
-- [x] `tsc --noEmit` limpo e suíte verde (94 testes)
-- [ ] Validado contra a API real do OpenRouter — **bloqueado**: a
-      `OPENROUTER_API_KEY` no `.env` não tem o formato `sk-or-v1-` e devolve
-      401 "Missing Authentication header" nos quatro modelos. A cadeia de
-      fallback foi exercida contra um stub local que imita o OpenRouter.
+- [x] `tsc --noEmit` limpo e suíte verde (108 testes)
+- [x] Validado contra a API real do OpenRouter, com o primeiro modelo da cadeia
+      (`nvidia/nemotron-3-super-120b-a12b:free`) em modo `json_schema`:
+      ~2k tokens de prompt, 20-24s por triagem, `aiAttempts: 1`
+
+## Calibragem: dimensões não avaliáveis
+
+O primeiro run com modelo real expôs um problema que o stub não mostrava: as
+cinco vagas triadas pontuaram 46-66, todas `MAYBE`, nenhuma chegando a `APPLY`.
+
+| | skill_match | rate_fit | seniority | urgency | score |
+|---|---|---|---|---|---|
+| peso | 40 | 20 | 20 | 20 | 100 |
+| observado | 20-38 | **10 sempre** | 12-18 | **4-5** | 46-66 |
+
+`rate_fit` estava travado em 10 porque **14 de 14** projetos tinham orçamento
+"Aberto" e a rubrica original mandava pontuar metade da faixa nesse caso — a
+dimensão virou constante. Com `urgency` estruturalmente baixa (todo projeto no
+99Freelas tem dezenas de propostas), o teto efetivo do score era 75, o que
+exigia skill_match e seniority_fit quase perfeitos para alcançar `APPLY`.
+
+A correção: dimensão sem dado **sai do cálculo** e o score é renormalizado sobre
+os pesos restantes (`scoreFromDimensions`). Com orçamento aberto:
+
+```
+score = (skill_match + seniority_fit + urgency) / 80 × 100
+```
+
+O score passa a significar "% de aderência no que deu para avaliar", fica na
+mesma escala de uma vaga com orçamento definido, e os limiares de tier seguem
+valendo sem ajuste. A exclusão vem do `budget_type` do scraper — fato observável
+— e é persistida em `unassessed_dimensions` (migration 0004) para a explicação
+não mentir: 71 sobre três dimensões não é a mesma coisa que 71 sobre quatro.
+
+Verificado com modelo real: `790517` ("Sistema web para gerar mapas
+numerológicos", orçamento aberto) pontuou 35+18+4 = 57 de 80 disponíveis → **71,
+`APPLY`**, e seguiu sozinha para a fila de proposta. A mesma vaga daria 57 e
+`MAYBE` na regra anterior.
 
 ## Próximos passos
 
-1. Gerar uma chave em <https://openrouter.ai/keys> e rodar uma descoberta real.
-2. Reconferir a cadeia de modelos: o tier gratuito do OpenRouter muda de
-   composição com frequência.
-3. Separar o banco do n8n — hoje as duas aplicações dividem o database `leads`.
+1. Reconferir a cadeia de modelos periodicamente: o tier gratuito do OpenRouter
+   muda de composição com frequência.
+2. Separar o banco do n8n — hoje as duas aplicações dividem o database `leads`
+   (115 tabelas do n8n convivem com `job_postings`).
+3. `urgency` ainda é estruturalmente baixa (4-5 de 20) porque todo projeto tem
+   muitas propostas. Vale avaliar se a rubrica deveria comparar o número de
+   propostas com a *mediana da plataforma* em vez de com zero.
+4. O modelo deixou `proposal_summary` vazio e `estimated_days`/`suggested_price`
+   nulos em todas as propostas reais. São opcionais por contrato, mas vale
+   reforçar o prompt se esses campos forem usados na revisão.

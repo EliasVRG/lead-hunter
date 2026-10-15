@@ -117,6 +117,8 @@ export interface JobPostingRow {
   score: number | null;
   tier: string | null;
   dimensions: Record<string, number> | null;
+  /** Dimensões fora do cálculo do score por falta de dado na vaga. */
+  unassessed_dimensions: string[] | null;
   reason: string | null;
   red_flags: string[] | null;
   matched_skills: string[] | null;

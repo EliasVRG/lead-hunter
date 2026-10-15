@@ -28,7 +28,11 @@ export class OpenRouterProvider {
       user: buildTriagePrompt(job, resume),
       temperature: aiConfig.temperature.triage,
       responseFormat: TRIAGE_RESPONSE_FORMAT,
-      normalize: normalizeTriage,
+      // Quais dimensões são avaliáveis é decidido pelo `budget_type` que o
+      // scraper extraiu, não pelo que o modelo respondeu — é fato observável
+      // da vaga. O prompt ainda pede `unassessed` para o modelo pontuar 0 em
+      // vez de inventar meia-nota, e para a justificativa dizer isso.
+      normalize: (raw) => normalizeTriage(raw, { budgetType: job.budget_type }),
     });
   }
 
